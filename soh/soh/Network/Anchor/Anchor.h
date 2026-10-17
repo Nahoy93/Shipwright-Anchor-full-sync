@@ -30,6 +30,7 @@ typedef struct {
     uint32_t seed;
     bool isSaveLoaded;
     bool isGameComplete;
+    bool isDown; // Co-op: player has died and is waiting to be revived by a teammate
     s16 sceneNum;
     s8 curRoomNum;
     s32 entranceIndex;
@@ -68,6 +69,12 @@ typedef struct {
     u8 showLocationsMode; // 0 = none, 1 = team, 2 = all
     u8 teleportMode;      // 0 = off, 1 = team, 2 = all
     u8 syncItemsAndFlags; // 0 = off, 1 = on
+    // Co-op settings
+    u8 shareRupees;       // 0 = off, 1 = rupees found by a teammate are added to everyone's own wallet
+    u8 teamDeath;         // 0 = off (vanilla), 1 = downed until revived, game over only when the whole team is down
+    u8 syncEnemies;       // 0 = off, 1 = enemies and bosses killed by a teammate die for everyone in the same area
+    u8 syncCutscenes;     // 0 = off, 1 = teammates in the same area, 2 = all teammates (pulled to the cutscene)
+    u8 syncEnemyMovement; // 0 = off, 1 = enemy positions and health follow one player per room (experimental)
 } RoomState;
 
 class Anchor : public Network {
@@ -110,6 +117,39 @@ class Anchor : public Network {
     void HandlePacket_UpdateDungeonItems(nlohmann::json payload);
     void HandlePacket_UpdateRoomState(nlohmann::json payload);
     void HandlePacket_UpdateTeamState(nlohmann::json payload);
+    void HandlePacket_BossDefeated(nlohmann::json payload);
+    void HandlePacket_CutsceneStart(nlohmann::json payload);
+    void HandlePacket_EnemyDefeated(nlohmann::json payload);
+    void HandlePacket_PlayerDown(nlohmann::json payload);
+    void HandlePacket_PlayerRevived(nlohmann::json payload);
+    void HandlePacket_RupeeIncome(nlohmann::json payload);
+    void HandlePacket_WarpSpawned(nlohmann::json payload);
+
+    // Co-op state, see Coop.cpp
+    void RegisterCoopHooks();
+    void ResetCoopState();
+    void Coop_OnGameFrame();
+    void Coop_OnPlayerUpdate();
+    void Coop_UpdateDownState(Player* player);
+    void Coop_UpdateRupees();
+    void Coop_UpdateCutsceneWatch();
+    void Coop_ProcessPendingCutscene();
+    bool Coop_IsTeammate(const AnchorClient& client);
+    bool Coop_IsAnyTeammateAlive();
+    bool Coop_CanStartRemoteCutscene();
+    void Coop_StartScriptCutscene(const std::string& path);
+    void Coop_KillBosses();
+    void Coop_ProcessPendingBossKill();
+    // Enemy movement/health sync, see EnemySync.cpp
+    void Coop_UpdateEnemySync();
+    void EnemySync_Reset();
+    void EnemySync_OnActorUpdate(Actor* actor);
+    uint32_t EnemySync_GetAuthority();
+    bool EnemySync_GetNetId(Actor* actor, uint32_t* authority, uint32_t* netId);
+    Actor* EnemySync_FindByNetId(uint32_t authority, uint32_t netId);
+    void HandlePacket_EnemySync(nlohmann::json payload);
+    void HandlePacket_EnemyHit(nlohmann::json payload);
+    void SendPacket_EnemySync();
 
   public:
     uint32_t ownClientId;
@@ -138,6 +178,49 @@ class Anchor : public Network {
     inline static const std::string UPDATE_DUNGEON_ITEMS = "UPDATE_DUNGEON_ITEMS";
     inline static const std::string UPDATE_ROOM_STATE = "UPDATE_ROOM_STATE";
     inline static const std::string UPDATE_TEAM_STATE = "UPDATE_TEAM_STATE";
+    // Co-op packet types
+    inline static const std::string BOSS_DEFEATED = "BOSS_DEFEATED";
+    inline static const std::string CUTSCENE_START = "CUTSCENE_START";
+    inline static const std::string ENEMY_DEFEATED = "ENEMY_DEFEATED";
+    inline static const std::string ENEMY_HIT = "ENEMY_HIT";
+    inline static const std::string ENEMY_SYNC = "ENEMY_SYNC";
+    inline static const std::string PLAYER_DOWN = "PLAYER_DOWN";
+    inline static const std::string PLAYER_REVIVED = "PLAYER_REVIVED";
+    inline static const std::string RUPEE_INCOME = "RUPEE_INCOME";
+    inline static const std::string WARP_SPAWNED = "WARP_SPAWNED";
+
+    // Co-op runtime state (game thread only)
+    struct CoopState {
+        // Team death
+        bool isDown = false;
+        bool allowGameOver = false;
+        bool isReviving = false;
+        bool reviveHealthApplied = false;
+        uint16_t reviveTimer = 0;
+        uint32_t reviverClientId = 0;
+        // Shared rupee income
+        bool rupeesInitialized = false;
+        s16 lastRupees = 0;
+        s32 pendingRemoteRupees = 0;
+        s32 outgoingRupees = 0;
+        uint16_t rupeeFlushTimer = 0;
+        // Cutscene sync
+        s16 lastCsState = 0;
+        bool isPlayingRemoteCutscene = false;
+        uint16_t remoteCutsceneGrace = 0;
+        std::string remoteCutscenePath;
+        uint32_t framesSinceLoad = 0;
+        uint32_t framesInScene = 0;
+        std::map<std::string, uint32_t> recentCutscenes; // key -> frame it was last played/sent
+        uint32_t frameCounter = 0;
+        // A cutscene we were asked to show but could not start yet
+        bool hasPendingCutscene = false;
+        nlohmann::json pendingCutscene;
+        uint32_t pendingCutsceneExpires = 0;
+        bool pendingTeleportDone = false;
+        // A boss kill that has to wait until we're out of a cutscene (boss intro)
+        s16 pendingBossKillScene = -1;
+    } coop;
 
     static Anchor* Instance;
     std::map<uint32_t, AnchorClient> clients;
@@ -176,6 +259,13 @@ class Anchor : public Network {
     void SendPacket_UpdateDungeonItems();
     void SendPacket_UpdateRoomState();
     void SendPacket_UpdateTeamState();
+    void SendPacket_BossDefeated(Actor* actor);
+    void SendPacket_CutsceneStart();
+    void SendPacket_EnemyDefeated(Actor* actor);
+    void SendPacket_PlayerDown();
+    void SendPacket_PlayerRevived(uint32_t reviverClientId);
+    void SendPacket_RupeeIncome(s32 amount);
+    void SendPacket_WarpSpawned(Actor* actor);
 };
 
 typedef enum {
@@ -189,10 +279,10 @@ class AnchorRoomWindow : public Ship::GuiWindow {
   public:
     using GuiWindow::GuiWindow;
 
-    void InitElement() override{};
+    void InitElement() override {};
     void DrawElement() override;
     void Draw() override;
-    void UpdateElement() override{};
+    void UpdateElement() override {};
 };
 
 #endif // __cplusplus

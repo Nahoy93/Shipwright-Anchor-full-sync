@@ -59,6 +59,16 @@ void Anchor::HandlePacket_GiveItem(nlohmann::json payload) {
         getItemEntry = Rando::StaticData::RetrieveItem(static_cast<RandomizerGet>(getItemId)).GetGIEntry_Copy();
     }
 
+    // With shared rupee income, rupees are already sent through RUPEE_INCOME (which also covers rupees picked up off
+    // the ground), so don't add them a second time here. Greg is still given since he is tracked as an item.
+    bool isRupee = getItemEntry.gid == GID_RUPEE_GREEN || getItemEntry.gid == GID_RUPEE_BLUE ||
+                   getItemEntry.gid == GID_RUPEE_RED || getItemEntry.gid == GID_RUPEE_PURPLE ||
+                   getItemEntry.gid == GID_RUPEE_GOLD;
+    bool isGreg = getItemEntry.modIndex == MOD_RANDOMIZER && getItemEntry.getItemId == RG_GREG_RUPEE;
+    if (roomState.shareRupees && isRupee && !isGreg) {
+        return;
+    }
+
     if (getItemEntry.modIndex == MOD_NONE) {
         if (getItemEntry.getItemId == GI_SWORD_BGS) {
             gSaveContext.bgsFlag = true;

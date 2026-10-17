@@ -51,6 +51,8 @@ void Anchor::HandlePacket_AllClientState(nlohmann::json payload) {
         clients[client.clientId].seed = client.seed;
         clients[client.clientId].isSaveLoaded = client.isSaveLoaded;
         clients[client.clientId].isGameComplete = client.isGameComplete;
+        clients[client.clientId].isDown = client.isDown;
+        clients[client.clientId].curRoomNum = client.curRoomNum;
         clients[client.clientId].sceneNum = client.sceneNum;
         clients[client.clientId].entranceIndex = client.entranceIndex;
     }

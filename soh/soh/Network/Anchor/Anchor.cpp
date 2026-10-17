@@ -24,6 +24,7 @@ void Anchor::Disable() {
     Network::Disable();
 
     clients.clear();
+    ResetCoopState();
     RefreshClientActors();
 }
 
@@ -169,6 +170,25 @@ void Anchor::ProcessIncomingPacketQueue() {
                 HandlePacket_UpdateRoomState(payload);
             else if (packetType == UPDATE_DUNGEON_ITEMS)
                 HandlePacket_UpdateDungeonItems(payload);
+            // Co-op
+            else if (packetType == BOSS_DEFEATED)
+                HandlePacket_BossDefeated(payload);
+            else if (packetType == CUTSCENE_START)
+                HandlePacket_CutsceneStart(payload);
+            else if (packetType == ENEMY_DEFEATED)
+                HandlePacket_EnemyDefeated(payload);
+            else if (packetType == ENEMY_SYNC)
+                HandlePacket_EnemySync(payload);
+            else if (packetType == ENEMY_HIT)
+                HandlePacket_EnemyHit(payload);
+            else if (packetType == PLAYER_DOWN)
+                HandlePacket_PlayerDown(payload);
+            else if (packetType == PLAYER_REVIVED)
+                HandlePacket_PlayerRevived(payload);
+            else if (packetType == RUPEE_INCOME)
+                HandlePacket_RupeeIncome(payload);
+            else if (packetType == WARP_SPAWNED)
+                HandlePacket_WarpSpawned(payload);
         } catch (const std::exception& e) {
             SPDLOG_ERROR("[Anchor] Exception while processing incoming packet {}", e.what());
             SPDLOG_ERROR("[Anchor] Packet: {}", payload.dump());

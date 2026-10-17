@@ -37,6 +37,11 @@ void Anchor::HandlePacket_DamagePlayer(nlohmann::json payload) {
     Player* otherPlayer = anchorClient.player;
     Player* self = GET_PLAYER(gPlayState);
 
+    // Downed players can't be hurt any further
+    if (coop.isDown) {
+        return;
+    }
+
     // Prevent incoming damage during cutscenes or item get sequences
     if (Player_InBlockingCsMode(gPlayState, self) || self->stateFlags1 & PLAYER_STATE1_IN_ITEM_CS ||
         self->stateFlags1 & PLAYER_STATE1_GETTING_ITEM) {

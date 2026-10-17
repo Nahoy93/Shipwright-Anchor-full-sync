@@ -21,11 +21,21 @@ nlohmann::json Anchor::PrepRoomState() {
         payload["showLocationsMode"] = 0;
         payload["teleportMode"] = 0;
         payload["syncItemsAndFlags"] = 0;
+        payload["shareRupees"] = 0;
+        payload["teamDeath"] = 0;
+        payload["syncEnemies"] = 0;
+        payload["syncCutscenes"] = 0;
+        payload["syncEnemyMovement"] = 0;
     } else {
         payload["pvpMode"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.PvpMode"), 1);
         payload["showLocationsMode"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.ShowLocationsMode"), 1);
         payload["teleportMode"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.TeleportMode"), 1);
         payload["syncItemsAndFlags"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncItemsAndFlags"), 1);
+        payload["shareRupees"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.ShareRupees"), 1);
+        payload["teamDeath"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.TeamDeath"), 1);
+        payload["syncEnemies"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncEnemies"), 1);
+        payload["syncCutscenes"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncCutscenes"), 2);
+        payload["syncEnemyMovement"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncEnemyMovement"), 1);
     }
 
     return payload;
@@ -49,4 +59,10 @@ void Anchor::HandlePacket_UpdateRoomState(nlohmann::json payload) {
     roomState.showLocationsMode = payload["state"]["showLocationsMode"].get<u8>();
     roomState.teleportMode = payload["state"]["teleportMode"].get<u8>();
     roomState.syncItemsAndFlags = payload["state"]["syncItemsAndFlags"].get<u8>();
+    // Co-op settings, rooms created by older clients don't have these
+    roomState.shareRupees = payload["state"].value("shareRupees", (u8)0);
+    roomState.teamDeath = payload["state"].value("teamDeath", (u8)0);
+    roomState.syncEnemies = payload["state"].value("syncEnemies", (u8)0);
+    roomState.syncCutscenes = payload["state"].value("syncCutscenes", (u8)0);
+    roomState.syncEnemyMovement = payload["state"].value("syncEnemyMovement", (u8)0);
 }

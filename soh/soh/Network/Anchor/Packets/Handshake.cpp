@@ -13,6 +13,8 @@ void Anchor::SendPacket_Handshake() {
     nlohmann::json payload;
     payload["type"] = HANDSHAKE;
     payload["roomId"] = CVarGetString(CVAR_REMOTE_ANCHOR("RoomId"), "");
+    // Only checked by servers that have a password set (see -password / ANCHOR_PASSWORD on the server)
+    payload["password"] = CVarGetString(CVAR_REMOTE_ANCHOR("Password"), "");
     payload["roomState"] = PrepRoomState();
     payload["clientState"] = PrepClientState();
 

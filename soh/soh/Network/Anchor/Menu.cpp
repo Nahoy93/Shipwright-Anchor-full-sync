@@ -14,6 +14,7 @@ extern std::shared_ptr<AnchorRoomWindow> mAnchorRoomWindow;
 static const char* pvpModes[3] = { "Off", "On", "On + Friendly Fire" };
 static std::vector<const char*> teleportModes = { "None", "Team Only", "All" };
 static std::vector<const char*> showLocationsModes = { "None", "Team Only", "All" };
+static std::vector<const char*> cutsceneSyncModes = { "Off", "Same Area Only", "Everyone (Pulled To Cutscene)" };
 
 void AnchorMainMenu(WidgetInfo& info) {
     auto anchor = Anchor::Instance;
@@ -23,6 +24,7 @@ void AnchorMainMenu(WidgetInfo& info) {
     std::string anchorTeamId = CVarGetString(CVAR_REMOTE_ANCHOR("TeamId"), "default");
     std::string anchorRoomId = CVarGetString(CVAR_REMOTE_ANCHOR("RoomId"), "");
     std::string anchorName = CVarGetString(CVAR_REMOTE_ANCHOR("Name"), "");
+    std::string anchorPassword = CVarGetString(CVAR_REMOTE_ANCHOR("Password"), "");
     bool isFormValid = !SohUtils::IsStringEmpty(host) && port > 1024 && port < 65535 &&
                        !SohUtils::IsStringEmpty(anchorRoomId) && !SohUtils::IsStringEmpty(anchorName);
 
@@ -64,6 +66,13 @@ void AnchorMainMenu(WidgetInfo& info) {
         CVarSetString(CVAR_REMOTE_ANCHOR("RoomId"), anchorRoomId.c_str());
         Ship::Context::GetRawInstance()->GetWindow()->GetGui()->SaveConsoleVariablesNextFrame();
     }
+    ImGui::Text("Server Password (leave empty if the server has none)");
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+    if (UIWidgets::InputString("##Password", &anchorPassword,
+                               UIWidgets::InputOptions().IsSecret(true).Color(THEME_COLOR))) {
+        CVarSetString(CVAR_REMOTE_ANCHOR("Password"), anchorPassword.c_str());
+        Ship::Context::GetRawInstance()->GetWindow()->GetGui()->SaveConsoleVariablesNextFrame();
+    }
     ImGui::Text("Team ID (Items & Flags Shared)");
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
     if (UIWidgets::InputString("##TeamId", &anchorTeamId, UIWidgets::InputOptions().Color(THEME_COLOR))) {
@@ -80,6 +89,7 @@ void AnchorMainMenu(WidgetInfo& info) {
         CVarSetString(CVAR_REMOTE_ANCHOR("TeamId"), "default");
         CVarSetString(CVAR_REMOTE_ANCHOR("RoomId"), "");
         CVarSetString(CVAR_REMOTE_ANCHOR("Name"), "");
+        CVarSetString(CVAR_REMOTE_ANCHOR("Password"), "");
         Ship::Context::GetRawInstance()->GetWindow()->GetGui()->SaveConsoleVariablesNextFrame();
     }
 
@@ -213,12 +223,68 @@ void AnchorAdminMenu(WidgetInfo& info) {
                                 UIWidgets::CheckboxOptions().DefaultValue(true).Color(THEME_COLOR))) {
         anchor->SendPacket_UpdateRoomState();
     }
+
+    ImGui::SeparatorText("Co-op");
+
+    if (UIWidgets::CVarCheckbox("Shared Rupee Income", CVAR_REMOTE_ANCHOR("RoomSettings.ShareRupees"),
+                                UIWidgets::CheckboxOptions()
+                                    .DefaultValue(true)
+                                    .Color(THEME_COLOR)
+                                    .Tooltip("Rupees a teammate finds are added to everyone's wallet. Spending only "
+                                             "affects your own wallet."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
+    if (UIWidgets::CVarCheckbox(
+            "Team Death (Revive Teammates)", CVAR_REMOTE_ANCHOR("RoomSettings.TeamDeath"),
+            UIWidgets::CheckboxOptions()
+                .DefaultValue(true)
+                .Color(THEME_COLOR)
+                .Tooltip(
+                    "Health is individual. A player who dies stays down until a teammate stands next to them for 2 "
+                    "seconds. When the whole team is down at once, everyone gets a game over and continues from their "
+                    "checkpoint or last save."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
+    if (UIWidgets::CVarCheckbox("Sync Enemy & Boss Kills", CVAR_REMOTE_ANCHOR("RoomSettings.SyncEnemies"),
+                                UIWidgets::CheckboxOptions()
+                                    .DefaultValue(true)
+                                    .Color(THEME_COLOR)
+                                    .Tooltip("Enemies and bosses defeated by a teammate also die for players in the "
+                                             "same area. Teammates in a boss "
+                                             "room also get the blue warp."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
+    if (UIWidgets::CVarCheckbox("Sync Enemy Movement & Health (Experimental)",
+                                CVAR_REMOTE_ANCHOR("RoomSettings.SyncEnemyMovement"),
+                                UIWidgets::CheckboxOptions()
+                                    .DefaultValue(true)
+                                    .Color(THEME_COLOR)
+                                    .Tooltip("Players in the same room see enemies in the same places and share their "
+                                             "health, so everyone's hits "
+                                             "count. Enemies spawned during gameplay appear for everyone. One player "
+                                             "per room leads the enemies. "
+                                             "Bosses only share their health."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
+    if (UIWidgets::CVarCombobox(
+            "Share Cutscenes With:", CVAR_REMOTE_ANCHOR("RoomSettings.SyncCutscenes"), cutsceneSyncModes,
+            UIWidgets::ComboboxOptions()
+                .DefaultIndex(2)
+                .LabelPosition(UIWidgets::LabelPositions::Above)
+                .Color(THEME_COLOR)
+                .Tooltip("When someone triggers a cutscene, teammates watch it too. With Everyone, teammates in other "
+                         "areas are brought to the cutscene first. Players of a different age don't get it."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
 }
 
 void AnchorInstructionsMenu(WidgetInfo& info) {
     auto anchor = Anchor::Instance;
 
     ImGui::SeparatorText("Usage Instructions");
+
+    ImGui::TextWrapped("0. Self hosted server: enter its address (your public IP or domain) and port under Host & "
+                       "Port, and the server password if it has one.");
 
     ImGui::TextWrapped("1. All players involved should start at the file select screen");
 
