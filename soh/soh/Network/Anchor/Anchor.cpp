@@ -193,6 +193,8 @@ void Anchor::ProcessIncomingPacketQueue() {
                 HandlePacket_ObjectBroken(payload);
             else if (packetType == TORCH_LIT)
                 HandlePacket_TorchLit(payload);
+            else if (packetType == TIME_SYNC)
+                HandlePacket_TimeSync(payload);
             else if (packetType == PLAYER_DOWN)
                 HandlePacket_PlayerDown(payload);
             else if (packetType == PLAYER_REVIVED)

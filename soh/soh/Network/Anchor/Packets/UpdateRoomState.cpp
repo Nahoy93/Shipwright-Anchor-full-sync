@@ -31,6 +31,8 @@ nlohmann::json Anchor::PrepRoomState() {
         payload["syncSongs"] = 0;
         payload["syncWarpSongs"] = 0;
         payload["syncInteractions"] = 0;
+        payload["syncPlayerEffects"] = 0;
+        payload["syncTime"] = 0;
     } else {
         payload["pvpMode"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.PvpMode"), 1);
         payload["showLocationsMode"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.ShowLocationsMode"), 1);
@@ -46,6 +48,8 @@ nlohmann::json Anchor::PrepRoomState() {
         payload["syncSongs"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncSongs"), 1);
         payload["syncWarpSongs"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncWarpSongs"), 1);
         payload["syncInteractions"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncInteractions"), 1);
+        payload["syncPlayerEffects"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncPlayerEffects"), 1);
+        payload["syncTime"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncTime"), 1);
     }
 
     return payload;
@@ -80,4 +84,6 @@ void Anchor::HandlePacket_UpdateRoomState(nlohmann::json payload) {
     roomState.syncSongs = payload["state"].value("syncSongs", (u8)0);
     roomState.syncWarpSongs = payload["state"].value("syncWarpSongs", (u8)0);
     roomState.syncInteractions = payload["state"].value("syncInteractions", (u8)0);
+    roomState.syncPlayerEffects = payload["state"].value("syncPlayerEffects", (u8)0);
+    roomState.syncTime = payload["state"].value("syncTime", (u8)0);
 }

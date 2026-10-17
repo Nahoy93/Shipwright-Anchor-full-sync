@@ -40,4 +40,16 @@ void Anchor::HandlePacket_PlayerSfx(nlohmann::json payload) {
     }
 
     Player_PlaySfx((Actor*)clients[clientId].player, sfxId);
+
+    // Megaton Hammer hitting the ground: show the shockwave and shake the camera a little when close
+    if (sfxId == NA_SE_IT_HAMMER_HIT && roomState.syncPlayerEffects) {
+        Player* dummy = clients[clientId].player;
+        static Vec3f zeroVec = { 0.0f, 0.0f, 0.0f };
+        Vec3f pos = dummy->meleeWeaponInfo[0].tip;
+        pos.y = dummy->actor.world.pos.y;
+        EffectSsBlast_SpawnWhiteShockwave(gPlayState, &pos, &zeroVec, &zeroVec);
+        if (dummy->actor.xyzDistToPlayerSq < 400.0f * 400.0f) {
+            Actor_RequestQuakeWithSpeed(gPlayState, 27767, 4, 10);
+        }
+    }
 }

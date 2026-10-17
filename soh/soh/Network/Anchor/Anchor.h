@@ -58,6 +58,12 @@ typedef struct {
     u8 ocarinaNote;
     f32 ocarinaModulator;
     s8 ocarinaBend;
+    // Co-op player effects (PLAYER_UPDATE)
+    u8 currentMask;
+    s16 stickFlame;
+    bool isBurning;
+    bool isShocked;
+    bool lensActive;
 
     // Ptr to the dummy player
     Player* player;
@@ -80,6 +86,8 @@ typedef struct {
     u8 syncSongs;         // 0 = off, 1 = song effects (Sun's Song, Song of Storms, Song of Time) happen for teammates
     u8 syncWarpSongs;     // 0 = off, 1 = warp songs bring the whole team along
     u8 syncInteractions;  // 0 = off, 1 = projectiles, pots/rocks/grass, push blocks and torches are shared
+    u8 syncPlayerEffects; // 0 = off, 1 = masks, burning/shock, burning sticks, Lens of Truth and hammer hits are shared
+    u8 syncTime;          // 0 = off, 1 = the whole team has the same time of day
 } RoomState;
 
 class Anchor : public Network {
@@ -175,6 +183,10 @@ class Anchor : public Network {
     void HandlePacket_WorldObjects(nlohmann::json payload);
     void HandlePacket_ObjectBroken(nlohmann::json payload);
     void HandlePacket_TorchLit(nlohmann::json payload);
+    // Player effects and time of day, see PlayerEffects.cpp
+    void Coop_UpdateLens();
+    void Coop_UpdateTimeSync();
+    void HandlePacket_TimeSync(nlohmann::json payload);
 
   public:
     uint32_t ownClientId;
@@ -213,6 +225,7 @@ class Anchor : public Network {
     inline static const std::string OCARINA_SONG = "OCARINA_SONG";
     inline static const std::string PROJECTILES = "PROJECTILES";
     inline static const std::string TORCH_LIT = "TORCH_LIT";
+    inline static const std::string TIME_SYNC = "TIME_SYNC";
     inline static const std::string WARP_SONG = "WARP_SONG";
     inline static const std::string WORLD_OBJECTS = "WORLD_OBJECTS";
     inline static const std::string PLAYER_DOWN = "PLAYER_DOWN";
@@ -305,6 +318,9 @@ typedef enum {
     DUMMY_PLAYER_HIT_RESPONSE_FIRE,
     DUMMY_PLAYER_HIT_RESPONSE_NORMAL,
 } DummyPlayerDamageResponseType;
+
+// Draws effects on a teammate's figure (burning, shock, burning stick), see PlayerEffects.cpp
+void Anchor_DummyPlayerEffects(Player* player, AnchorClient& client);
 
 // Saved sessions (connection presets), see Sessions.cpp
 void AnchorSessionsMenu(bool isEnabled);

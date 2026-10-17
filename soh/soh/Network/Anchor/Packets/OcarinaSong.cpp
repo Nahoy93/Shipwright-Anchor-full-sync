@@ -126,9 +126,9 @@ void Anchor::HandlePacket_OcarinaSong(nlohmann::json payload) {
 
     switch (song) {
         case OCARINA_SONG_SUNS:
-            if (gSaveContext.sunsSongState == SUNSSONG_INACTIVE &&
-                gPlayState->interfaceCtx.restrictions.sunsSong == 0 &&
-                gPlayState->transitionTrigger == TRANS_TRIGGER_OFF && gPlayState->csCtx.state == CS_STATE_IDLE) {
+            // Applies wherever the teammate is, even where they couldn't play the song themselves
+            if (gSaveContext.sunsSongState == SUNSSONG_INACTIVE && gPlayState->transitionTrigger == TRANS_TRIGGER_OFF &&
+                gPlayState->csCtx.state == CS_STATE_IDLE) {
                 gSaveContext.sunsSongState = SUNSSONG_START;
             }
             break;
@@ -181,7 +181,7 @@ void Anchor::HandlePacket_WarpSong(nlohmann::json payload) {
     sHasPendingWarp = true;
     sPendingWarpSong = song;
     sPendingWarpClient = payload.value("clientId", (uint32_t)0);
-    sPendingWarpExpires = coop.frameCounter + 20 * 10;
+    sPendingWarpExpires = coop.frameCounter + 20 * 60;
 }
 
 void Anchor::Coop_ProcessPendingWarp() {

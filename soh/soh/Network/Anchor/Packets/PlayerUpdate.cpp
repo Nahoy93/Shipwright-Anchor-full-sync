@@ -74,6 +74,11 @@ void Anchor::SendPacket_PlayerUpdate() {
     payload["unk_862"] = player->unk_862;
     payload["unk_85C"] = player->unk_85C;
     payload["actionVar1"] = player->av1.actionVar1;
+    payload["currentMask"] = player->currentMask;
+    payload["stickFlame"] = player->heldItemAction == PLAYER_IA_DEKU_STICK ? player->unk_860 : 0;
+    payload["isBurning"] = (bool)player->bodyIsBurning;
+    payload["isShocked"] = player->bodyShockTimer != 0;
+    payload["lensActive"] = gPlayState->actorCtx.lensActive && gSaveContext.magicState == MAGIC_STATE_CONSUME_LENS;
     payload["quiet"] = true;
 
     for (auto& [clientId, client] : clients) {
@@ -122,5 +127,10 @@ void Anchor::HandlePacket_PlayerUpdate(nlohmann::json payload) {
         client.unk_862 = payload.value("unk_862", (s16)0);
         client.unk_85C = payload.value("unk_85C", (f32)0);
         client.actionVar1 = payload.value("actionVar1", (s8)0);
+        client.currentMask = payload.value("currentMask", (u8)0);
+        client.stickFlame = payload.value("stickFlame", (s16)0);
+        client.isBurning = payload.value("isBurning", false);
+        client.isShocked = payload.value("isShocked", false);
+        client.lensActive = payload.value("lensActive", false);
     }
 }

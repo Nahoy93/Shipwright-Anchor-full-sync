@@ -280,6 +280,26 @@ void AnchorAdminMenu(WidgetInfo& info) {
         anchor->SendPacket_UpdateRoomState();
     }
 
+    if (UIWidgets::CVarCheckbox(
+            "Share Player Effects", CVAR_REMOTE_ANCHOR("RoomSettings.SyncPlayerEffects"),
+            UIWidgets::CheckboxOptions()
+                .DefaultValue(true)
+                .Color(THEME_COLOR)
+                .Tooltip(
+                    "Masks, being on fire or shocked, burning Deku Sticks and Megaton Hammer hits show on teammates' "
+                    "figures. When a teammate in the same room uses the Lens of Truth, you see what it reveals "
+                    "too."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
+    if (UIWidgets::CVarCheckbox("Shared Time Of Day", CVAR_REMOTE_ANCHOR("RoomSettings.SyncTime"),
+                                UIWidgets::CheckboxOptions()
+                                    .DefaultValue(true)
+                                    .Color(THEME_COLOR)
+                                    .Tooltip("The whole team has the same time of day, following the player who joined "
+                                             "first."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
+
     ImGui::SeparatorText("Ocarina");
     if (UIWidgets::CVarCheckbox(
             "Share Song Effects", CVAR_REMOTE_ANCHOR("RoomSettings.SyncSongs"),

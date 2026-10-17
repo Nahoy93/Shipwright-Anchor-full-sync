@@ -118,6 +118,8 @@ void Anchor::Coop_OnGameFrame() {
     Coop_UpdateSongWatch();
     Coop_ProcessPendingWarp();
     Coop_UpdateInteractions();
+    Coop_UpdateLens();
+    Coop_UpdateTimeSync();
 }
 
 void Anchor::Coop_OnPlayerUpdate() {

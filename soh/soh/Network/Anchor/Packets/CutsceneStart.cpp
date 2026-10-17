@@ -28,7 +28,7 @@ extern PlayState* gPlayState;
  */
 
 static constexpr uint32_t RECENT_CUTSCENE_FRAMES = 20 * 30;  // 30 seconds
-static constexpr uint32_t PENDING_CUTSCENE_FRAMES = 20 * 10; // give up after 10 seconds of being busy
+static constexpr uint32_t PENDING_CUTSCENE_FRAMES = 20 * 60; // give up after a minute of being busy
 
 static bool IsRecentCutscene(std::map<std::string, uint32_t>& recent, const std::string& key, uint32_t now) {
     auto it = recent.find(key);
