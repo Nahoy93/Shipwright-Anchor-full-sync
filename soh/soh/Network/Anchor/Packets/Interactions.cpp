@@ -23,14 +23,18 @@ void EnKusa_SpawnFragments(EnKusa* this_, PlayState* play);
  *
  * Makes what players do to the world visible and shared for teammates in the same scene:
  *
- *  - Projectiles (arrows, seeds, deku nuts, bombs, bombchus, boomerang) are mirrored: a copy is spawned on every
- *    teammate's game and follows the owner's projectile. The copies are only visuals (they don't run their own
- *    logic); the damage they do already reaches everyone through the enemy health sync. Bomb explosions are shown.
+ *  - Projectiles (arrows incl. fire/ice/light, seeds, deku nuts, bombs, bombchus, boomerang, hookshot) and magic
+ *    (Din's Fire, Farore's Wind, Nayru's Love) are mirrored: a copy is spawned on every teammate's game and follows
+ *    the owner's one. The copies are only visuals (they don't run their own logic); the damage they do already reaches
+ *    everyone through the enemy health sync. Bomb explosions are shown. Copies that draw themselves around "the
+ *    player" (hookshot chain, Nayru's Love) are drawn around the owner's figure instead.
  *  - Pots, crates, rocks and bushes that are picked up, thrown or broken, grass that is cut, and push blocks (and other
  *    pushable objects) follow whoever moves them.
  *  - Torches lit by a teammate light up for everyone, so torch puzzles can be solved together.
  *
  * Objects placed in the scene are matched by actor id, params and home position, which are the same everywhere.
+ * Objects spawned during gameplay are matched to the closest one of the same kind, and spawned for teammates that
+ * don't have them.
  */
 
 struct ProjectileNet {
@@ -56,7 +60,111 @@ static bool sApplyingRemote = false;
 static std::set<uint64_t> sShownExplosions;
 
 static bool IsProjectile(s16 id) {
-    return id == ACTOR_EN_ARROW || id == ACTOR_EN_BOM || id == ACTOR_EN_BOM_CHU || id == ACTOR_EN_BOOM;
+    return id == ACTOR_EN_ARROW || id == ACTOR_EN_BOM || id == ACTOR_EN_BOM_CHU || id == ACTOR_EN_BOOM ||
+           id == ACTOR_ARMS_HOOK || id == ACTOR_MAGIC_FIRE || id == ACTOR_MAGIC_WIND || id == ACTOR_MAGIC_DARK;
+}
+
+// Fire/ice/light arrows are separate actors attached to the arrow
+static bool IsArrowElement(s16 id) {
+    return id == ACTOR_ARROW_FIRE || id == ACTOR_ARROW_ICE || id == ACTOR_ARROW_LIGHT;
+}
+
+static bool IsMirrorable(s16 id) {
+    return IsProjectile(id) || IsArrowElement(id);
+}
+
+// Original draw/destroy of mirrors we wrap
+struct MirrorFuncs {
+    ActorFunc draw;
+    ActorFunc destroy;
+    uint32_t owner;
+};
+static std::unordered_map<Actor*, MirrorFuncs> sMirrorFuncs;
+
+// Magic actors reset the local player's magic (and Nayru's Love) when they are created or removed. Mirrors must not
+// touch the local player's state, so save and restore it around them.
+struct LocalMagicState {
+    u8 magicState;
+    u8 prevMagicState;
+    u16 nayrusLoveTimer;
+};
+static LocalMagicState SaveLocalMagic() {
+    return { gSaveContext.magicState, gSaveContext.prevMagicState, gSaveContext.nayrusLoveTimer };
+}
+static void RestoreLocalMagic(const LocalMagicState& state) {
+    gSaveContext.magicState = state.magicState;
+    gSaveContext.prevMagicState = state.prevMagicState;
+    gSaveContext.nayrusLoveTimer = state.nayrusLoveTimer;
+}
+
+static void MirrorDraw(Actor* actor, PlayState* play) {
+    auto it = sMirrorFuncs.find(actor);
+    if (it == sMirrorFuncs.end() || it->second.draw == nullptr) {
+        return;
+    }
+
+    // Draw as if the owner's figure was the player
+    Player* owner = nullptr;
+    if (Anchor::Instance->clients.contains(it->second.owner)) {
+        owner = Anchor::Instance->clients[it->second.owner].player;
+    }
+    if (owner == nullptr || owner->actor.update == nullptr) {
+        return;
+    }
+
+    Actor* realPlayer = play->actorCtx.actorLists[ACTORCAT_PLAYER].head;
+    u8 rightHandType = owner->rightHandType;
+    if (actor->id == ACTOR_ARMS_HOOK) {
+        owner->rightHandType = PLAYER_MODELTYPE_RH_HOOKSHOT;
+    }
+    play->actorCtx.actorLists[ACTORCAT_PLAYER].head = &owner->actor;
+    it->second.draw(actor, play);
+    play->actorCtx.actorLists[ACTORCAT_PLAYER].head = realPlayer;
+    owner->rightHandType = rightHandType;
+}
+
+static void MirrorDestroy(Actor* actor, PlayState* play) {
+    auto it = sMirrorFuncs.find(actor);
+    if (it == sMirrorFuncs.end()) {
+        return;
+    }
+    ActorFunc destroy = it->second.destroy;
+    sMirrorFuncs.erase(it);
+
+    if (destroy != nullptr) {
+        LocalMagicState magic = SaveLocalMagic();
+        destroy(actor, play);
+        RestoreLocalMagic(magic);
+    }
+}
+
+static Actor* SpawnMirror(Actor* parent, s16 actorId, Vec3f pos, s16 rotX, s16 rotY, s16 params, uint32_t owner,
+                          uint32_t projId) {
+    LocalMagicState magic = SaveLocalMagic();
+    Actor* mirror;
+    if (parent != nullptr) {
+        mirror = Actor_SpawnAsChild(&gPlayState->actorCtx, parent, gPlayState, actorId, pos.x, pos.y, pos.z, rotX, rotY,
+                                    0, params);
+    } else {
+        mirror = Actor_Spawn(&gPlayState->actorCtx, gPlayState, actorId, pos.x, pos.y, pos.z, rotX, rotY, 0, params);
+    }
+    RestoreLocalMagic(magic);
+
+    if (mirror == nullptr) {
+        return nullptr;
+    }
+
+    // Some magic sets its position to the (local) player when created
+    mirror->world.pos = pos;
+    ObjectExtension::GetInstance().Set<ProjectileNet>(mirror, ProjectileNet{ projId, owner, true });
+
+    bool drawsAroundPlayer = actorId == ACTOR_ARMS_HOOK || actorId == ACTOR_MAGIC_DARK;
+    sMirrorFuncs[mirror] = MirrorFuncs{ mirror->draw, mirror->destroy, owner };
+    if (drawsAroundPlayer) {
+        mirror->draw = MirrorDraw;
+    }
+    mirror->destroy = MirrorDestroy;
+    return mirror;
 }
 
 static bool IsBreakable(s16 id) {
@@ -73,19 +181,31 @@ static bool IsInCurrentRoom(Actor* actor) {
     return actor->room == -1 || actor->room == gPlayState->roomCtx.curRoom.num;
 }
 
+// Objects placed in the scene have the same home position everywhere. Objects spawned during gameplay usually spawn
+// in (nearly) the same spot, so fall back to the closest object of the same kind.
+static constexpr float RUNTIME_MATCH_DISTANCE = 100.0f;
+
 static Actor* FindPlacedActor(s16 actorId, s16 params, const Vec3f& home) {
+    Actor* closest = nullptr;
+    float closestDist = RUNTIME_MATCH_DISTANCE;
     for (int category = 0; category < ACTORCAT_MAX; category++) {
         Actor* actor = gPlayState->actorCtx.actorLists[category].head;
         while (actor != nullptr) {
-            if (actor->update != nullptr && actor->id == actorId && actor->params == params &&
-                fabsf(actor->home.pos.x - home.x) < 2.0f && fabsf(actor->home.pos.y - home.y) < 2.0f &&
-                fabsf(actor->home.pos.z - home.z) < 2.0f) {
-                return actor;
+            if (actor->update != nullptr && actor->id == actorId && actor->params == params) {
+                Vec3f actorHome = actor->home.pos;
+                float dist = Math_Vec3f_DistXYZ(&actorHome, (Vec3f*)&home);
+                if (dist < 2.0f) {
+                    return actor;
+                }
+                if (dist < closestDist) {
+                    closest = actor;
+                    closestDist = dist;
+                }
             }
             actor = actor->next;
         }
     }
-    return nullptr;
+    return closest;
 }
 
 static nlohmann::json HomeOf(Actor* actor) {
@@ -149,7 +269,7 @@ void Anchor::Interactions_Reset() {
 
 // Mirrors and objects being moved by a teammate don't run their own logic
 void Anchor::Interactions_ShouldActorUpdate(Actor* actor, bool* should) {
-    if (IsProjectile(actor->id)) {
+    if (IsMirrorable(actor->id)) {
         ProjectileNet* net = ObjectExtension::GetInstance().Get<ProjectileNet>(actor);
         if (net != nullptr && net->isMirror) {
             *should = false;
@@ -200,11 +320,12 @@ void Anchor::Coop_UpdateInteractions() {
     for (int category = 0; category < ACTORCAT_MAX; category++) {
         Actor* actor = gPlayState->actorCtx.actorLists[category].head;
         while (actor != nullptr) {
-            if (IsProjectile(actor->id) && actor->update != nullptr) {
+            if (IsMirrorable(actor->id) && actor->update != nullptr) {
                 ProjectileNet* net = ObjectExtension::GetInstance().Get<ProjectileNet>(actor);
                 if (net != nullptr && net->isMirror &&
                     (!clients.contains(net->owner) || clients[net->owner].sceneNum != gPlayState->sceneNum ||
-                     !clients[net->owner].online)) {
+                     !clients[net->owner].online ||
+                     (IsArrowElement(actor->id) && (actor->parent == nullptr || actor->parent->update == nullptr)))) {
                     Actor_Kill(actor);
                 }
             }
@@ -241,9 +362,14 @@ void Anchor::Coop_UpdateInteractions() {
                 }
                 if (!net->isMirror) {
                     bool exploding = actor->id == ACTOR_EN_BOM && actor->params == BOMB_EXPLOSION;
+                    s16 element = 0;
+                    if (actor->id == ACTOR_EN_ARROW && actor->child != nullptr && actor->child->update != nullptr &&
+                        IsArrowElement(actor->child->id)) {
+                        element = actor->child->id;
+                    }
                     projectiles.push_back({ net->projId, actor->id, actor->params, (s32)actor->world.pos.x,
                                             (s32)actor->world.pos.y, (s32)actor->world.pos.z, actor->shape.rot.x,
-                                            actor->shape.rot.y, exploding ? 1 : 0 });
+                                            actor->shape.rot.y, exploding ? 1 : 0, element });
                 }
             } else if (IsMovableObject(actor->id) && IsInCurrentRoom(actor)) {
                 WorldObjectNet* net = ObjectExtension::GetInstance().Get<WorldObjectNet>(actor);
@@ -265,6 +391,7 @@ void Anchor::Coop_UpdateInteractions() {
                     entry.push_back((s32)actor->world.pos.y);
                     entry.push_back((s32)actor->world.pos.z);
                     entry.push_back(actor->shape.rot.y);
+                    entry.push_back(actor->room);
                     objects.push_back(entry);
                 }
 
@@ -360,6 +487,7 @@ void Anchor::HandlePacket_Projectiles(nlohmann::json payload) {
         s16 rotX = entry.at(6).get<s16>();
         s16 rotY = entry.at(7).get<s16>();
         bool exploding = entry.at(8).get<int>() != 0;
+        s16 element = entry.size() > 9 ? entry.at(9).get<s16>() : 0;
         present.insert(projId);
 
         auto it = mirrors.find(projId);
@@ -377,26 +505,33 @@ void Anchor::HandlePacket_Projectiles(nlohmann::json payload) {
             continue;
         }
 
+        Actor* mirror = nullptr;
         if (it != mirrors.end()) {
-            Actor* mirror = it->second;
+            mirror = it->second;
             mirror->world.pos = pos;
             mirror->shape.rot.x = mirror->world.rot.x = rotX;
             mirror->shape.rot.y = mirror->world.rot.y = rotY;
-            continue;
+        } else {
+            sApplyingRemote = true;
+            mirror = SpawnMirror(nullptr, actorId, pos, rotX, rotY, params, owner, projId);
+            sApplyingRemote = false;
         }
 
-        sApplyingRemote = true;
-        Actor* mirror =
-            Actor_Spawn(&gPlayState->actorCtx, gPlayState, actorId, pos.x, pos.y, pos.z, rotX, rotY, 0, params);
-        sApplyingRemote = false;
-        if (mirror != nullptr) {
-            ObjectExtension::GetInstance().Set<ProjectileNet>(mirror, ProjectileNet{ projId, owner, true });
+        // Fire/ice/light arrow effect on the copy of the arrow
+        if (mirror != nullptr && element != 0 &&
+            (mirror->child == nullptr || mirror->child->update == nullptr || mirror->child->id != element)) {
+            sApplyingRemote = true;
+            SpawnMirror(mirror, element, pos, rotX, rotY, 0, owner, 0);
+            sApplyingRemote = false;
         }
     }
 
     // Projectiles the owner no longer has hit something or ran out, remove the copies
     for (auto& [projId, mirror] : mirrors) {
         if (!present.contains(projId)) {
+            if (mirror->child != nullptr && IsArrowElement(mirror->child->id)) {
+                Actor_Kill(mirror->child);
+            }
             Actor_Kill(mirror);
         }
     }
@@ -408,7 +543,21 @@ void Anchor::HandlePacket_WorldObjects(nlohmann::json payload) {
     }
 
     for (auto& entry : payload.at("list")) {
-        Actor* actor = FindPlacedActor(entry.at(0).get<s16>(), entry.at(1).get<s16>(), ReadVec(entry, 2));
+        s16 actorId = entry.at(0).get<s16>();
+        s16 params = entry.at(1).get<s16>();
+        Vec3f home = ReadVec(entry, 2);
+        Actor* actor = FindPlacedActor(actorId, params, home);
+
+        // A teammate has an object (spawned during gameplay) that we don't, spawn it. Only in the room we're both in,
+        // objects of other rooms simply aren't loaded here.
+        s8 room = entry.size() > 9 ? entry.at(9).get<s8>() : -2;
+        if (actor == nullptr && IsBreakable(actorId) && (room == -1 || room == gPlayState->roomCtx.curRoom.num)) {
+            sApplyingRemote = true;
+            actor = Actor_Spawn(&gPlayState->actorCtx, gPlayState, actorId, home.x, home.y, home.z, 0,
+                                entry.at(8).get<s16>(), 0, params);
+            sApplyingRemote = false;
+        }
+
         if (actor == nullptr || IsHeldByLocalPlayer(actor)) {
             continue;
         }
