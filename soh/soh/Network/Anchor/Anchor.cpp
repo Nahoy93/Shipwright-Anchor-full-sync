@@ -181,6 +181,18 @@ void Anchor::ProcessIncomingPacketQueue() {
                 HandlePacket_EnemySync(payload);
             else if (packetType == ENEMY_HIT)
                 HandlePacket_EnemyHit(payload);
+            else if (packetType == OCARINA_SONG)
+                HandlePacket_OcarinaSong(payload);
+            else if (packetType == WARP_SONG)
+                HandlePacket_WarpSong(payload);
+            else if (packetType == PROJECTILES)
+                HandlePacket_Projectiles(payload);
+            else if (packetType == WORLD_OBJECTS)
+                HandlePacket_WorldObjects(payload);
+            else if (packetType == OBJECT_BROKEN)
+                HandlePacket_ObjectBroken(payload);
+            else if (packetType == TORCH_LIT)
+                HandlePacket_TorchLit(payload);
             else if (packetType == PLAYER_DOWN)
                 HandlePacket_PlayerDown(payload);
             else if (packetType == PLAYER_REVIVED)

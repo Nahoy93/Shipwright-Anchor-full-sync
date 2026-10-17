@@ -78,9 +78,17 @@ void Anchor::RegisterCoopHooks() {
     COND_HOOK(OnSceneSpawnActors, isConnected, [&]() {
         coop.framesInScene = 0;
         EnemySync_Reset();
+        Interactions_Reset();
     });
 
     COND_HOOK(OnActorUpdate, isConnected, [&](void* refActor) { EnemySync_OnActorUpdate((Actor*)refActor); });
+
+    COND_HOOK(ShouldActorUpdate, isConnected,
+              [&](void* refActor, bool* should) { Interactions_ShouldActorUpdate((Actor*)refActor, should); });
+
+    COND_HOOK(OnActorKill, isConnected, [&](void* refActor) { Interactions_OnActorKill((Actor*)refActor); });
+
+    COND_HOOK(OnWarpSongLeave, isConnected, [&]() { SendPacket_WarpSong(); });
 
     COND_HOOK(OnEnemyDefeat, isConnected, [&](void* refActor) { SendPacket_EnemyDefeated((Actor*)refActor); });
 
@@ -107,6 +115,9 @@ void Anchor::Coop_OnGameFrame() {
     Coop_ProcessPendingCutscene();
     Coop_ProcessPendingBossKill();
     Coop_UpdateEnemySync();
+    Coop_UpdateSongWatch();
+    Coop_ProcessPendingWarp();
+    Coop_UpdateInteractions();
 }
 
 void Anchor::Coop_OnPlayerUpdate() {

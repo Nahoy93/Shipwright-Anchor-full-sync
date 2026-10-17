@@ -77,6 +77,9 @@ typedef struct {
     u8 syncEnemyMovement; // 0 = off, 1 = enemy positions and health follow one player per room (experimental)
     u8 playerUpdateRate;  // Player position/animation updates sent per second (1-20)
     u8 enemyUpdateRate;   // Enemy snapshots sent per second (1-20)
+    u8 syncSongs;         // 0 = off, 1 = song effects (Sun's Song, Song of Storms, Song of Time) happen for teammates
+    u8 syncWarpSongs;     // 0 = off, 1 = warp songs bring the whole team along
+    u8 syncInteractions;  // 0 = off, 1 = projectiles, pots/rocks/grass, push blocks and torches are shared
 } RoomState;
 
 class Anchor : public Network {
@@ -154,6 +157,24 @@ class Anchor : public Network {
     void SendPacket_EnemySync();
     // Converts an "updates per second" room setting to "send every N game updates" (the game runs 20 updates/sec)
     static uint32_t RateToInterval(u8 perSecond);
+    // Ocarina songs, see OcarinaSong.cpp
+    void Coop_UpdateSongWatch();
+    void Coop_ProcessPendingWarp();
+    void SendPacket_OcarinaSong(uint8_t song);
+    void SendPacket_WarpSong();
+    void HandlePacket_OcarinaSong(nlohmann::json payload);
+    void HandlePacket_WarpSong(nlohmann::json payload);
+    // World interactions, see Interactions.cpp
+    void Coop_UpdateInteractions();
+    bool Coop_AnyTeammateInScene();
+    void Coop_SendToTeammatesInScene(nlohmann::json& payload);
+    void Interactions_Reset();
+    void Interactions_ShouldActorUpdate(Actor* actor, bool* should);
+    void Interactions_OnActorKill(Actor* actor);
+    void HandlePacket_Projectiles(nlohmann::json payload);
+    void HandlePacket_WorldObjects(nlohmann::json payload);
+    void HandlePacket_ObjectBroken(nlohmann::json payload);
+    void HandlePacket_TorchLit(nlohmann::json payload);
 
   public:
     uint32_t ownClientId;
@@ -188,6 +209,12 @@ class Anchor : public Network {
     inline static const std::string ENEMY_DEFEATED = "ENEMY_DEFEATED";
     inline static const std::string ENEMY_HIT = "ENEMY_HIT";
     inline static const std::string ENEMY_SYNC = "ENEMY_SYNC";
+    inline static const std::string OBJECT_BROKEN = "OBJECT_BROKEN";
+    inline static const std::string OCARINA_SONG = "OCARINA_SONG";
+    inline static const std::string PROJECTILES = "PROJECTILES";
+    inline static const std::string TORCH_LIT = "TORCH_LIT";
+    inline static const std::string WARP_SONG = "WARP_SONG";
+    inline static const std::string WORLD_OBJECTS = "WORLD_OBJECTS";
     inline static const std::string PLAYER_DOWN = "PLAYER_DOWN";
     inline static const std::string PLAYER_REVIVED = "PLAYER_REVIVED";
     inline static const std::string RUPEE_INCOME = "RUPEE_INCOME";

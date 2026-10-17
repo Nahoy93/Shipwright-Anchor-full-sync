@@ -268,6 +268,37 @@ void AnchorAdminMenu(WidgetInfo& info) {
                                              "Bosses only share their health."))) {
         anchor->SendPacket_UpdateRoomState();
     }
+    if (UIWidgets::CVarCheckbox(
+            "Share Projectiles & Objects", CVAR_REMOTE_ANCHOR("RoomSettings.SyncInteractions"),
+            UIWidgets::CheckboxOptions()
+                .DefaultValue(true)
+                .Color(THEME_COLOR)
+                .Tooltip(
+                    "Teammates in the same area see your arrows, seeds, nuts, bombs, bombchus and boomerang. Pots, "
+                    "crates, "
+                    "rocks, bushes, grass, push blocks and torches are shared, so you can solve puzzles together."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
+
+    ImGui::SeparatorText("Ocarina");
+    if (UIWidgets::CVarCheckbox(
+            "Share Song Effects", CVAR_REMOTE_ANCHOR("RoomSettings.SyncSongs"),
+            UIWidgets::CheckboxOptions()
+                .DefaultValue(true)
+                .Color(THEME_COLOR)
+                .Tooltip("Sun's Song changes the time for the whole team, Song of Storms makes it rain and Song of "
+                         "Time moves "
+                         "the blocks for teammates in the same area. Everyone is told which song was played."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
+    if (UIWidgets::CVarCheckbox("Warp Songs Bring The Team", CVAR_REMOTE_ANCHOR("RoomSettings.SyncWarpSongs"),
+                                UIWidgets::CheckboxOptions()
+                                    .DefaultValue(true)
+                                    .Color(THEME_COLOR)
+                                    .Tooltip("When someone warps with a warp song, all teammates warp along."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
+
     ImGui::SeparatorText("Sync Rate");
     if (UIWidgets::CVarSliderInt("Player Updates Per Second: %d", CVAR_REMOTE_ANCHOR("RoomSettings.PlayerUpdateRate"),
                                  UIWidgets::IntSliderOptions()
