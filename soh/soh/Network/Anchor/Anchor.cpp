@@ -195,6 +195,18 @@ void Anchor::ProcessIncomingPacketQueue() {
                 HandlePacket_TorchLit(payload);
             else if (packetType == TIME_SYNC)
                 HandlePacket_TimeSync(payload);
+            else if (packetType == FARORES_WIND)
+                HandlePacket_FaroresWind(payload);
+            else if (packetType == MUSIC)
+                HandlePacket_Music(payload);
+            else if (packetType == SILVER_COLLECTED)
+                HandlePacket_SilverCollected(payload);
+            else if (packetType == DROP_SPAWN)
+                HandlePacket_DropSpawn(payload);
+            else if (packetType == DROP_MOVE)
+                HandlePacket_DropMove(payload);
+            else if (packetType == DROP_GONE)
+                HandlePacket_DropGone(payload);
             else if (packetType == PLAYER_DOWN)
                 HandlePacket_PlayerDown(payload);
             else if (packetType == PLAYER_REVIVED)

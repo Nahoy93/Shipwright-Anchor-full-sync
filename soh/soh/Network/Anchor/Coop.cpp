@@ -86,7 +86,19 @@ void Anchor::RegisterCoopHooks() {
     COND_HOOK(ShouldActorUpdate, isConnected,
               [&](void* refActor, bool* should) { Interactions_ShouldActorUpdate((Actor*)refActor, should); });
 
-    COND_HOOK(OnActorKill, isConnected, [&](void* refActor) { Interactions_OnActorKill((Actor*)refActor); });
+    COND_HOOK(OnActorKill, isConnected, [&](void* refActor) {
+        Interactions_OnActorKill((Actor*)refActor);
+        Drops_OnActorKill((Actor*)refActor);
+    });
+
+    COND_HOOK(OnActorInit, isConnected, [&](void* refActor) { Drops_OnActorInit((Actor*)refActor); });
+
+    COND_VB_SHOULD(VB_SILVER_COLLECT, isConnected, {
+        Actor* silverRupee = va_arg(args, Actor*);
+        if (Anchor::Instance->Interactions_ForceSilverCollect(silverRupee)) {
+            *should = true;
+        }
+    });
 
     COND_HOOK(OnWarpSongLeave, isConnected, [&]() { SendPacket_WarpSong(); });
 
@@ -120,6 +132,9 @@ void Anchor::Coop_OnGameFrame() {
     Coop_UpdateInteractions();
     Coop_UpdateLens();
     Coop_UpdateTimeSync();
+    Coop_UpdateDrops();
+    Coop_UpdateFaroresWind();
+    Coop_UpdateMusic();
 }
 
 void Anchor::Coop_OnPlayerUpdate() {

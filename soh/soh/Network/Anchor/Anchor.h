@@ -88,6 +88,9 @@ typedef struct {
     u8 syncInteractions;  // 0 = off, 1 = projectiles, pots/rocks/grass, push blocks and torches are shared
     u8 syncPlayerEffects; // 0 = off, 1 = masks, burning/shock, burning sticks, Lens of Truth and hammer hits are shared
     u8 syncTime;          // 0 = off, 1 = the whole team has the same time of day
+    u8 syncMusic;         // 0 = off, 1 = the music in an area follows the teammate with the lowest id there
+    u8 objectUpdateRate;  // Projectile, object and drop updates sent per second (1-20)
+    u8 timeSyncSeconds;   // How often the time of day is sent, in seconds (1-30)
 } RoomState;
 
 class Anchor : public Network {
@@ -187,6 +190,21 @@ class Anchor : public Network {
     void Coop_UpdateLens();
     void Coop_UpdateTimeSync();
     void HandlePacket_TimeSync(nlohmann::json payload);
+    void Coop_UpdateFaroresWind();
+    void HandlePacket_FaroresWind(nlohmann::json payload);
+    void Coop_UpdateMusic();
+    void HandlePacket_Music(nlohmann::json payload);
+    // More interactions
+    bool Coop_IsLowestIdInScene();
+    bool Interactions_ForceSilverCollect(Actor* actor);
+    void HandlePacket_SilverCollected(nlohmann::json payload);
+    // Drops, fairies, bugs and fish, see Drops.cpp
+    void Drops_OnActorInit(Actor* actor);
+    void Drops_OnActorKill(Actor* actor);
+    void Coop_UpdateDrops();
+    void HandlePacket_DropSpawn(nlohmann::json payload);
+    void HandlePacket_DropMove(nlohmann::json payload);
+    void HandlePacket_DropGone(nlohmann::json payload);
 
   public:
     uint32_t ownClientId;
@@ -226,6 +244,12 @@ class Anchor : public Network {
     inline static const std::string PROJECTILES = "PROJECTILES";
     inline static const std::string TORCH_LIT = "TORCH_LIT";
     inline static const std::string TIME_SYNC = "TIME_SYNC";
+    inline static const std::string FARORES_WIND = "FARORES_WIND";
+    inline static const std::string MUSIC = "MUSIC";
+    inline static const std::string SILVER_COLLECTED = "SILVER_COLLECTED";
+    inline static const std::string DROP_SPAWN = "DROP_SPAWN";
+    inline static const std::string DROP_MOVE = "DROP_MOVE";
+    inline static const std::string DROP_GONE = "DROP_GONE";
     inline static const std::string WARP_SONG = "WARP_SONG";
     inline static const std::string WORLD_OBJECTS = "WORLD_OBJECTS";
     inline static const std::string PLAYER_DOWN = "PLAYER_DOWN";
@@ -321,6 +345,8 @@ typedef enum {
 
 // Draws effects on a teammate's figure (burning, shock, burning stick), see PlayerEffects.cpp
 void Anchor_DummyPlayerEffects(Player* player, AnchorClient& client);
+// Spawns a visual effect that runs and draws around a teammate's figure (ocarina song waves), see Interactions.cpp
+Actor* Anchor_SpawnEffectMirror(s16 actorId, Vec3f pos, s16 params, uint32_t owner);
 
 // Saved sessions (connection presets), see Sessions.cpp
 void AnchorSessionsMenu(bool isEnabled);

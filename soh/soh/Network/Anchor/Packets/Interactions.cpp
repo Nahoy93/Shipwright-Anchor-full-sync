@@ -12,7 +12,11 @@ extern "C" {
 #include "src/overlays/actors/ovl_En_Bom/z_en_bom.h"
 #include "src/overlays/actors/ovl_En_Kusa/z_en_kusa.h"
 #include "src/overlays/actors/ovl_Obj_Syokudai/z_obj_syokudai.h"
+#include "src/overlays/actors/ovl_En_Bombf/z_en_bombf.h"
+#include "src/overlays/actors/ovl_En_G_Switch/z_en_g_switch.h"
 extern PlayState* gPlayState;
+void EnGSwitch_SilverRupeeIdle(EnGSwitch* this_, PlayState* play);
+void EnGSwitch_SilverRupeeCollected(EnGSwitch* this_, PlayState* play);
 void EnKusa_SetupCut(EnKusa* this_);
 void EnKusa_CutWaitRegrow(EnKusa* this_, PlayState* play);
 void EnKusa_SpawnFragments(EnKusa* this_, PlayState* play);
@@ -61,7 +65,8 @@ static std::set<uint64_t> sShownExplosions;
 
 static bool IsProjectile(s16 id) {
     return id == ACTOR_EN_ARROW || id == ACTOR_EN_BOM || id == ACTOR_EN_BOM_CHU || id == ACTOR_EN_BOOM ||
-           id == ACTOR_ARMS_HOOK || id == ACTOR_MAGIC_FIRE || id == ACTOR_MAGIC_WIND || id == ACTOR_MAGIC_DARK;
+           id == ACTOR_ARMS_HOOK || id == ACTOR_MAGIC_FIRE || id == ACTOR_MAGIC_WIND || id == ACTOR_MAGIC_DARK ||
+           id == ACTOR_EN_M_THUNDER;
 }
 
 // Fire/ice/light arrows are separate actors attached to the arrow
@@ -78,6 +83,7 @@ struct MirrorFuncs {
     ActorFunc draw;
     ActorFunc destroy;
     uint32_t owner;
+    ActorFunc update = nullptr;
 };
 static std::unordered_map<Actor*, MirrorFuncs> sMirrorFuncs;
 
@@ -123,6 +129,28 @@ static void MirrorDraw(Actor* actor, PlayState* play) {
     owner->rightHandType = rightHandType;
 }
 
+// Effects that follow "the player" in their update (ocarina song waves) run it with the owner's figure as the player
+static void MirrorUpdate(Actor* actor, PlayState* play) {
+    auto it = sMirrorFuncs.find(actor);
+    if (it == sMirrorFuncs.end() || it->second.update == nullptr) {
+        return;
+    }
+    Player* owner = nullptr;
+    if (Anchor::Instance->clients.contains(it->second.owner)) {
+        owner = Anchor::Instance->clients[it->second.owner].player;
+    }
+    if (owner == nullptr || owner->actor.update == nullptr) {
+        Actor_Kill(actor);
+        return;
+    }
+    Actor* realPlayer = play->actorCtx.actorLists[ACTORCAT_PLAYER].head;
+    play->actorCtx.actorLists[ACTORCAT_PLAYER].head = &owner->actor;
+    LocalMagicState magic = SaveLocalMagic();
+    it->second.update(actor, play);
+    RestoreLocalMagic(magic);
+    play->actorCtx.actorLists[ACTORCAT_PLAYER].head = realPlayer;
+}
+
 static void MirrorDestroy(Actor* actor, PlayState* play) {
     auto it = sMirrorFuncs.find(actor);
     if (it == sMirrorFuncs.end()) {
@@ -158,7 +186,7 @@ static Actor* SpawnMirror(Actor* parent, s16 actorId, Vec3f pos, s16 rotX, s16 r
     mirror->world.pos = pos;
     ObjectExtension::GetInstance().Set<ProjectileNet>(mirror, ProjectileNet{ projId, owner, true });
 
-    bool drawsAroundPlayer = actorId == ACTOR_ARMS_HOOK || actorId == ACTOR_MAGIC_DARK;
+    bool drawsAroundPlayer = actorId == ACTOR_ARMS_HOOK || actorId == ACTOR_MAGIC_DARK || actorId == ACTOR_EN_M_THUNDER;
     sMirrorFuncs[mirror] = MirrorFuncs{ mirror->draw, mirror->destroy, owner };
     if (drawsAroundPlayer) {
         mirror->draw = MirrorDraw;
@@ -167,14 +195,40 @@ static Actor* SpawnMirror(Actor* parent, s16 actorId, Vec3f pos, s16 rotX, s16 r
     return mirror;
 }
 
-static bool IsBreakable(s16 id) {
+Actor* Anchor_SpawnEffectMirror(s16 actorId, Vec3f pos, s16 params, uint32_t owner) {
+    Actor* mirror = SpawnMirror(nullptr, actorId, pos, 0, 0, params, owner, 0);
+    if (mirror == nullptr) {
+        return nullptr;
+    }
+    // Not a mirrored projectile: this one runs its own update, around the owner's figure
+    ObjectExtension::GetInstance().Remove<ProjectileNet>(mirror);
+    sMirrorFuncs[mirror].update = mirror->update;
+    mirror->update = MirrorUpdate;
+    mirror->draw = MirrorDraw;
+    return mirror;
+}
+
+// Objects that can be picked up, thrown and broken. Missing ones are spawned for teammates.
+static bool IsSpawnableObject(s16 id) {
     return id == ACTOR_OBJ_TSUBO || id == ACTOR_OBJ_KIBAKO || id == ACTOR_OBJ_KIBAKO2 || id == ACTOR_EN_ISHI ||
            id == ACTOR_EN_KUSA;
 }
 
+// Objects whose destruction is shared (beehives, and the bombs that grow on Bomb Flowers)
+static bool IsBreakable(s16 id) {
+    return IsSpawnableObject(id) || id == ACTOR_OBJ_COMB || id == ACTOR_EN_BOMBF;
+}
+
+// Objects that move continuously by themselves. Only the teammate with the lowest id sends them, or two players would
+// keep correcting each other.
+static bool IsAutoMover(s16 id) {
+    return id == ACTOR_EN_GOROIWA;
+}
+
 static bool IsMovableObject(s16 id) {
-    return IsBreakable(id) || id == ACTOR_OBJ_OSHIHIKI || id == ACTOR_BG_SPOT15_RRBOX || id == ACTOR_BG_HAKA ||
-           id == ACTOR_BG_HIDAN_ROCK;
+    return IsBreakable(id) || IsAutoMover(id) || id == ACTOR_OBJ_OSHIHIKI || id == ACTOR_BG_SPOT15_RRBOX ||
+           id == ACTOR_BG_HAKA || id == ACTOR_BG_HIDAN_ROCK || id == ACTOR_BG_ICE_OBJECTS ||
+           id == ACTOR_BG_MORI_KAITENKABE || id == ACTOR_BG_SPOT18_OBJ || id == ACTOR_BG_JYA_COBRA;
 }
 
 static bool IsInCurrentRoom(Actor* actor) {
@@ -237,9 +291,21 @@ static void ShowBreakEffect(Actor* actor) {
         sfx = NA_SE_EV_WOODBOX_BREAK;
     } else if (actor->id == ACTOR_EN_ISHI) {
         sfx = NA_SE_EV_ROCK_BROKEN;
+    } else if (actor->id == ACTOR_EN_BOMBF) {
+        ShowBombExplosion(actor->world.pos);
+        return;
     }
     EffectSsHahen_SpawnBurst(gPlayState, &actor->world.pos, 10.0f, 0, 15, 10, 10, -1, 10, NULL);
     SoundSource_PlaySfxAtFixedWorldPos(gPlayState, &actor->world.pos, 20, sfx);
+}
+
+bool Anchor::Coop_IsLowestIdInScene() {
+    for (auto& [clientId, client] : clients) {
+        if (Coop_IsTeammate(client) && client.sceneNum == gPlayState->sceneNum && clientId < ownClientId) {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool Anchor::Coop_AnyTeammateInScene() {
@@ -338,7 +404,7 @@ void Anchor::Coop_UpdateInteractions() {
         return;
     }
 
-    if (++sSendTimer < RateToInterval(roomState.playerUpdateRate)) {
+    if (++sSendTimer < RateToInterval(roomState.objectUpdateRate)) {
         return;
     }
     sSendTimer = 0;
@@ -371,7 +437,10 @@ void Anchor::Coop_UpdateInteractions() {
                                             (s32)actor->world.pos.y, (s32)actor->world.pos.z, actor->shape.rot.x,
                                             actor->shape.rot.y, exploding ? 1 : 0, element });
                 }
-            } else if (IsMovableObject(actor->id) && IsInCurrentRoom(actor)) {
+            } else if (IsMovableObject(actor->id) && IsInCurrentRoom(actor) &&
+                       // Only the bomb itself moves, not the flower, and not while it explodes
+                       !(actor->id == ACTOR_EN_BOMBF && actor->params != BOMBFLOWER_BODY) &&
+                       !(IsAutoMover(actor->id) && !Coop_IsLowestIdInScene())) {
                 WorldObjectNet* net = ObjectExtension::GetInstance().Get<WorldObjectNet>(actor);
                 if (net == nullptr) {
                     ObjectExtension::GetInstance().Set<WorldObjectNet>(actor, WorldObjectNet{});
@@ -410,6 +479,23 @@ void Anchor::Coop_UpdateInteractions() {
                     }
                     net->wasCut = isCut;
                 }
+            } else if (actor->id == ACTOR_EN_G_SWITCH && ((EnGSwitch*)actor)->type == ENGSWITCH_SILVER_RUPEE) {
+                // Silver rupee picked up by us
+                WorldObjectNet* net = ObjectExtension::GetInstance().Get<WorldObjectNet>(actor);
+                if (net == nullptr) {
+                    ObjectExtension::GetInstance().Set<WorldObjectNet>(actor, WorldObjectNet{});
+                    net = ObjectExtension::GetInstance().Get<WorldObjectNet>(actor);
+                }
+                bool collected = ((EnGSwitch*)actor)->actionFunc == EnGSwitch_SilverRupeeCollected;
+                if (collected && !net->wasCut) {
+                    nlohmann::json payload;
+                    payload["type"] = SILVER_COLLECTED;
+                    payload["sceneNum"] = gPlayState->sceneNum;
+                    payload["params"] = actor->params;
+                    payload["home"] = HomeOf(actor);
+                    Coop_SendToTeammatesInScene(payload);
+                }
+                net->wasCut = collected;
             } else if (actor->id == ACTOR_OBJ_SYOKUDAI) {
                 ObjSyokudai* torch = (ObjSyokudai*)actor;
                 WorldObjectNet* net = ObjectExtension::GetInstance().Get<WorldObjectNet>(actor);
@@ -551,7 +637,7 @@ void Anchor::HandlePacket_WorldObjects(nlohmann::json payload) {
         // A teammate has an object (spawned during gameplay) that we don't, spawn it. Only in the room we're both in,
         // objects of other rooms simply aren't loaded here.
         s8 room = entry.size() > 9 ? entry.at(9).get<s8>() : -2;
-        if (actor == nullptr && IsBreakable(actorId) && (room == -1 || room == gPlayState->roomCtx.curRoom.num)) {
+        if (actor == nullptr && IsSpawnableObject(actorId) && (room == -1 || room == gPlayState->roomCtx.curRoom.num)) {
             sApplyingRemote = true;
             actor = Actor_Spawn(&gPlayState->actorCtx, gPlayState, actorId, home.x, home.y, home.z, 0,
                                 entry.at(8).get<s16>(), 0, params);
@@ -584,7 +670,12 @@ void Anchor::HandlePacket_ObjectBroken(nlohmann::json payload) {
 
     Vec3f home = { (f32)payload.at("home").at(0).get<s32>(), (f32)payload.at("home").at(1).get<s32>(),
                    (f32)payload.at("home").at(2).get<s32>() };
-    Actor* actor = FindPlacedActor(payload.at("actorId").get<s16>(), payload.at("params").get<s16>(), home);
+    s16 actorId = payload.at("actorId").get<s16>();
+    Actor* actor = FindPlacedActor(actorId, payload.at("params").get<s16>(), home);
+    if (actor == nullptr && actorId == ACTOR_EN_BOMBF) {
+        // The teammate's bomb had already turned into its explosion, ours is still a bomb
+        actor = FindPlacedActor(actorId, BOMBFLOWER_BODY, home);
+    }
     if (actor == nullptr || IsHeldByLocalPlayer(actor)) {
         return;
     }
@@ -628,4 +719,45 @@ void Anchor::HandlePacket_TorchLit(nlohmann::json payload) {
             net->lastTorchTimer = torch->litTimer;
         }
     }
+}
+
+// MARK: - Silver rupees
+
+// Silver rupees count towards their puzzle through a counter inside the game's own code, so a teammate's pickup is
+// replayed as our own pickup (the game's "collect this rupee" check is forced to pass once).
+static std::set<Actor*> sForcedSilverRupees;
+
+bool Anchor::Interactions_ForceSilverCollect(Actor* actor) {
+    auto it = sForcedSilverRupees.find(actor);
+    if (it == sForcedSilverRupees.end()) {
+        return false;
+    }
+    sForcedSilverRupees.erase(it);
+    return true;
+}
+
+void Anchor::HandlePacket_SilverCollected(nlohmann::json payload) {
+    if (!roomState.syncInteractions || !IsSaveLoaded() || payload.at("sceneNum").get<s16>() != gPlayState->sceneNum) {
+        return;
+    }
+
+    Vec3f home = { (f32)payload.at("home").at(0).get<s32>(), (f32)payload.at("home").at(1).get<s32>(),
+                   (f32)payload.at("home").at(2).get<s32>() };
+    Actor* actor = FindPlacedActor(ACTOR_EN_G_SWITCH, payload.at("params").get<s16>(), home);
+    if (actor == nullptr || ((EnGSwitch*)actor)->actionFunc != EnGSwitch_SilverRupeeIdle) {
+        return;
+    }
+
+    // The forced pickup gives us 5 rupees. With shared income the teammate's 5 already arrive, so take them back.
+    if (roomState.shareRupees) {
+        gSaveContext.rupeeAccumulator -= 5;
+    }
+    sForcedSilverRupees.insert(actor);
+
+    WorldObjectNet* net = ObjectExtension::GetInstance().Get<WorldObjectNet>(actor);
+    if (net == nullptr) {
+        ObjectExtension::GetInstance().Set<WorldObjectNet>(actor, WorldObjectNet{});
+        net = ObjectExtension::GetInstance().Get<WorldObjectNet>(actor);
+    }
+    net->wasCut = true;
 }

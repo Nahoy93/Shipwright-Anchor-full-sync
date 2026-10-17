@@ -58,8 +58,8 @@ void Anchor::SendPacket_CutsceneStart() {
         return;
     }
 
-    // Credits and the opening cutscene of a new file are not shared
-    if (gSaveContext.ship.stats.gameComplete || coop.framesSinceLoad < 40) {
+    // The opening cutscene of a new file is not shared (the credits are: teammates are brought along)
+    if (coop.framesSinceLoad < 40) {
         return;
     }
 

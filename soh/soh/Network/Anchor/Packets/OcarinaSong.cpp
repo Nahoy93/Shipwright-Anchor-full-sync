@@ -120,6 +120,19 @@ void Anchor::HandlePacket_OcarinaSong(nlohmann::json payload) {
 
     Notification::Emit({ .prefix = name, .message = "played", .suffix = SongName(song) });
 
+    // The song's visual effect around the teammate's figure (Sun's Song has none here: its effect actor changes the
+    // time on whoever runs it, which the time skip below already takes care of)
+    static const s16 effectIds[] = {
+        ACTOR_OCEFF_WIPE3, ACTOR_OCEFF_WIPE2, ACTOR_OCEFF_WIPE,  0,
+        ACTOR_OCEFF_WIPE,  ACTOR_OCEFF_STORM, ACTOR_OCEFF_WIPE4,
+    };
+    static const s16 effectParams[] = { 0, 0, 0, 0, 1, 0, 0 };
+    if (sameScene && song >= OCARINA_SONG_SARIAS && song <= OCARINA_SONG_SCARECROW_SPAWN &&
+        effectIds[song - OCARINA_SONG_SARIAS] != 0) {
+        Anchor_SpawnEffectMirror(effectIds[song - OCARINA_SONG_SARIAS], pos, effectParams[song - OCARINA_SONG_SARIAS],
+                                 clientId);
+    }
+
     if (coop.isDown) {
         return;
     }
@@ -133,10 +146,7 @@ void Anchor::HandlePacket_OcarinaSong(nlohmann::json payload) {
             }
             break;
         case OCARINA_SONG_STORMS:
-            if (sameScene) {
-                Actor_Spawn(&gPlayState->actorCtx, gPlayState, ACTOR_EN_OKARINA_EFFECT, pos.x, pos.y - 30.0f, pos.z, 0,
-                            0, 0, 1);
-            }
+            // The Song of Storms effect starts the rain itself (see the song visuals below)
             break;
         case OCARINA_SONG_TIME:
             if (sameScene) {

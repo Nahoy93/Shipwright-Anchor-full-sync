@@ -300,6 +300,16 @@ void AnchorAdminMenu(WidgetInfo& info) {
         anchor->SendPacket_UpdateRoomState();
     }
 
+    if (UIWidgets::CVarCheckbox(
+            "Shared Music", CVAR_REMOTE_ANCHOR("RoomSettings.SyncMusic"),
+            UIWidgets::CheckboxOptions()
+                .DefaultValue(true)
+                .Color(THEME_COLOR)
+                .Tooltip("Everyone in the same area hears the same music, following the teammate who "
+                         "joined first."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
+
     ImGui::SeparatorText("Ocarina");
     if (UIWidgets::CVarCheckbox(
             "Share Song Effects", CVAR_REMOTE_ANCHOR("RoomSettings.SyncSongs"),
@@ -339,6 +349,27 @@ void AnchorAdminMenu(WidgetInfo& info) {
                                      .Color(THEME_COLOR)
                                      .Tooltip("How often the player leading a room sends the enemies' positions and "
                                               "health. Higher is smoother but uses more bandwidth."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
+    if (UIWidgets::CVarSliderInt("Projectile & Object Updates Per Second: %d",
+                                 CVAR_REMOTE_ANCHOR("RoomSettings.ObjectUpdateRate"),
+                                 UIWidgets::IntSliderOptions()
+                                     .Min(1)
+                                     .Max(20)
+                                     .DefaultValue(20)
+                                     .Color(THEME_COLOR)
+                                     .Tooltip("How often projectiles, magic, moved objects (pots, blocks, boulders) "
+                                              "and loose items (drops, fairies, bugs, fish) are sent."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
+    if (UIWidgets::CVarSliderInt("Time Of Day Sync Every %d Seconds",
+                                 CVAR_REMOTE_ANCHOR("RoomSettings.TimeSyncSeconds"),
+                                 UIWidgets::IntSliderOptions()
+                                     .Min(1)
+                                     .Max(30)
+                                     .DefaultValue(5)
+                                     .Color(THEME_COLOR)
+                                     .Tooltip("How often the time keeper sends the time of day."))) {
         anchor->SendPacket_UpdateRoomState();
     }
 

@@ -29,6 +29,9 @@ extern PlayState* gPlayState;
  *  - spawn enemies the authority has but they don't (enemies spawned during gameplay), and remove enemies the
  *    authority no longer has
  *
+ * Stuns and freezes (Deku Nuts, ice arrows, Din's Fire knockback flashes...) are shared the same way as damage.
+ * Enemies too far away to update on a follower's game still follow the authority's position.
+ *
  * Bosses only share their health, moving them around would break their scripted phases.
  *
  * Deaths still go through ENEMY_DEFEATED, which uses the network id when there is one.
@@ -38,6 +41,9 @@ struct EnemyNet {
     uint32_t netId = 0;
     uint32_t authority = 0;
     u8 lastHealth = 0;
+    u8 lastColorTimer = 0;
+    u16 lastFreezeTimer = 0;
+    uint32_t lastFollowFrame = 0;
 };
 static ObjectExtension::Register<EnemyNet> EnemyNetRegister;
 
@@ -49,11 +55,15 @@ struct EnemyTarget {
     u8 health = 0;
     bool isBoss = false;
     bool hasParent = false;
+    u16 freezeTimer = 0;
+    u16 colorFilterParams = 0;
+    u8 colorFilterTimer = 0;
     u8 missing = 0;
     uint32_t lastSnapshot = 0;
 };
 
 static std::unordered_map<uint32_t, EnemyTarget> sTargets;
+static void FollowTarget(Actor* actor, EnemyTarget& target);
 static uint32_t sTargetAuthority = 0;
 static uint32_t sSnapshotSeq = 0;
 static uint32_t sNextNetId = 1;
@@ -192,6 +202,35 @@ void Anchor::Coop_UpdateEnemySync() {
         ClearFollowerState();
         sTargetAuthority = authority;
     }
+
+    // Enemies that didn't update this frame (too far away, outside the culling area) still follow the authority
+    for (Actor* actor : GetSyncableEnemies()) {
+        EnemyNet* net = ObjectExtension::GetInstance().Get<EnemyNet>(actor);
+        if (net == nullptr || net->authority != authority || net->lastFollowFrame == coop.frameCounter) {
+            continue;
+        }
+        auto it = sTargets.find(net->netId);
+        if (it != sTargets.end()) {
+            FollowTarget(actor, it->second);
+        }
+    }
+}
+
+static void FollowTarget(Actor* actor, EnemyTarget& target) {
+    if (target.isBoss || IsHoldingPlayerActor(actor)) {
+        return;
+    }
+
+    float dist = Math_Vec3f_DistXYZ(&actor->world.pos, &target.pos);
+    if (dist > SNAP_DISTANCE) {
+        actor->world.pos = target.pos;
+    } else {
+        actor->world.pos.x += (target.pos.x - actor->world.pos.x) * FOLLOW_FACTOR;
+        actor->world.pos.y += (target.pos.y - actor->world.pos.y) * FOLLOW_FACTOR;
+        actor->world.pos.z += (target.pos.z - actor->world.pos.z) * FOLLOW_FACTOR;
+    }
+    Math_SmoothStepToS(&actor->world.rot.y, target.rotY, 2, 0x2000, 0);
+    actor->shape.rot.y = actor->world.rot.y;
 }
 
 void Anchor::EnemySync_OnActorUpdate(Actor* actor) {
@@ -213,35 +252,39 @@ void Anchor::EnemySync_OnActorUpdate(Actor* actor) {
 
     // Health: report damage we did, take damage others did. Never set it to 0 here, deaths go through ENEMY_DEFEATED
     u8 health = actor->colChkInfo.health;
-    if (health < net->lastHealth && health > 0) {
+    bool hurt = health < net->lastHealth && health > 0;
+    // A new stun or color flash we caused (the timer only jumps up when something applies one)
+    bool stunned = actor->colorFilterTimer > net->lastColorTimer + 1 || actor->freezeTimer > net->lastFreezeTimer + 1;
+    if (hurt || stunned) {
         nlohmann::json payload;
         payload["type"] = ENEMY_HIT;
         payload["targetClientId"] = sCurrentAuthority;
         payload["netId"] = net->netId;
         payload["health"] = health;
+        payload["freezeTimer"] = actor->freezeTimer;
+        payload["colorFilterParams"] = actor->colorFilterParams;
+        payload["colorFilterTimer"] = actor->colorFilterTimer;
         SendJsonToRemote(payload);
         target.health = MIN(target.health, health);
     }
     if (target.health > 0 && target.health < health) {
         actor->colChkInfo.health = target.health;
     }
+
+    // Stuns from the authority (or another follower, through the authority)
+    if (target.freezeTimer > actor->freezeTimer) {
+        actor->freezeTimer = target.freezeTimer;
+    }
+    if (target.colorFilterTimer > actor->colorFilterTimer + 1) {
+        actor->colorFilterParams = target.colorFilterParams;
+        actor->colorFilterTimer = target.colorFilterTimer;
+    }
     net->lastHealth = actor->colChkInfo.health;
+    net->lastColorTimer = actor->colorFilterTimer;
+    net->lastFreezeTimer = actor->freezeTimer;
+    net->lastFollowFrame = coop.frameCounter + 1;
 
-    // Movement
-    if (target.isBoss || IsHoldingPlayerActor(actor)) {
-        return;
-    }
-
-    float dist = Math_Vec3f_DistXYZ(&actor->world.pos, &target.pos);
-    if (dist > SNAP_DISTANCE) {
-        actor->world.pos = target.pos;
-    } else {
-        actor->world.pos.x += (target.pos.x - actor->world.pos.x) * FOLLOW_FACTOR;
-        actor->world.pos.y += (target.pos.y - actor->world.pos.y) * FOLLOW_FACTOR;
-        actor->world.pos.z += (target.pos.z - actor->world.pos.z) * FOLLOW_FACTOR;
-    }
-    Math_SmoothStepToS(&actor->world.rot.y, target.rotY, 2, 0x2000, 0);
-    actor->shape.rot.y = actor->world.rot.y;
+    FollowTarget(actor, target);
 }
 
 // MARK: - Packets
@@ -259,7 +302,8 @@ void Anchor::SendPacket_EnemySync() {
 
         enemies.push_back({ net->netId, actor->id, actor->params, (s32)actor->world.pos.x, (s32)actor->world.pos.y,
                             (s32)actor->world.pos.z, actor->shape.rot.y, actor->colChkInfo.health,
-                            actor->category == ACTORCAT_BOSS ? 1 : 0, actor->parent != nullptr ? 1 : 0 });
+                            actor->category == ACTORCAT_BOSS ? 1 : 0, actor->parent != nullptr ? 1 : 0,
+                            actor->freezeTimer, actor->colorFilterParams, actor->colorFilterTimer });
     }
 
     nlohmann::json payload;
@@ -300,6 +344,9 @@ void Anchor::HandlePacket_EnemySync(nlohmann::json payload) {
         target.health = entry.at(7).get<u8>();
         target.isBoss = entry.at(8).get<int>() != 0;
         target.hasParent = entry.at(9).get<int>() != 0;
+        target.freezeTimer = entry.size() > 10 ? entry.at(10).get<u16>() : 0;
+        target.colorFilterParams = entry.size() > 11 ? entry.at(11).get<u16>() : 0;
+        target.colorFilterTimer = entry.size() > 12 ? entry.at(12).get<u8>() : 0;
         target.lastSnapshot = sSnapshotSeq;
     }
 
@@ -383,8 +430,23 @@ void Anchor::HandlePacket_EnemyHit(nlohmann::json payload) {
     }
 
     Actor* actor = EnemySync_FindByNetId(ownClientId, payload.at("netId").get<uint32_t>());
+    if (actor == nullptr) {
+        return;
+    }
+
+    // Stuns a follower caused
+    u16 freezeTimer = payload.value("freezeTimer", (u16)0);
+    u8 colorFilterTimer = payload.value("colorFilterTimer", (u8)0);
+    if (freezeTimer > actor->freezeTimer) {
+        actor->freezeTimer = freezeTimer;
+    }
+    if (colorFilterTimer > actor->colorFilterTimer) {
+        actor->colorFilterParams = payload.value("colorFilterParams", (u16)0);
+        actor->colorFilterTimer = colorFilterTimer;
+    }
+
     u8 health = payload.at("health").get<u8>();
-    if (actor != nullptr && health > 0 && health < actor->colChkInfo.health) {
+    if (health > 0 && health < actor->colChkInfo.health) {
         actor->colChkInfo.health = health;
         // Flash red like a normal hit
         Actor_SetColorFilter(actor, 0x4000, 255, 0, 8);
