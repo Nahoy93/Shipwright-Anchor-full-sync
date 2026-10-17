@@ -33,6 +33,13 @@ void Anchor::SendPacket_PlayerUpdate() {
         return;
     }
 
+    // Room setting: how many updates per second to send
+    static uint32_t framesSinceLastUpdate = 0;
+    if (++framesSinceLastUpdate < RateToInterval(roomState.playerUpdateRate)) {
+        return;
+    }
+    framesSinceLastUpdate = 0;
+
     Player* player = GET_PLAYER(gPlayState);
     nlohmann::json payload;
 

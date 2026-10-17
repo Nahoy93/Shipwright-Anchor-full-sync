@@ -63,6 +63,7 @@ void Anchor::RegisterCoopHooks() {
     COND_HOOK(OnPlayerUpdate, isConnected, [&]() { Coop_OnPlayerUpdate(); });
 
     COND_HOOK(OnLoadGame, isConnected, [&](s16 fileNum) {
+        AnchorSessions_RecordSaveFile(fileNum);
         coop.isDown = false;
         coop.allowGameOver = false;
         coop.isReviving = false;

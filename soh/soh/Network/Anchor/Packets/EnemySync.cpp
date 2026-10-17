@@ -151,6 +151,14 @@ Actor* Anchor::EnemySync_FindByNetId(uint32_t authority, uint32_t netId) {
     return nullptr;
 }
 
+uint32_t Anchor::RateToInterval(u8 perSecond) {
+    if (perSecond == 0) {
+        perSecond = 1;
+    }
+    // Round to the nearest whole number of game updates
+    return MAX(1, (20 + perSecond / 2) / MIN(perSecond, 20));
+}
+
 // MARK: - Per frame
 
 void Anchor::Coop_UpdateEnemySync() {
@@ -172,8 +180,8 @@ void Anchor::Coop_UpdateEnemySync() {
 
     if (authority == ownClientId) {
         ClearFollowerState();
-        // 20 game updates per second, snapshot every other one
-        if (++sSendTimer >= 2) {
+        // Room setting: snapshots per second
+        if (++sSendTimer >= RateToInterval(roomState.enemyUpdateRate)) {
             sSendTimer = 0;
             SendPacket_EnemySync();
         }

@@ -26,6 +26,8 @@ nlohmann::json Anchor::PrepRoomState() {
         payload["syncEnemies"] = 0;
         payload["syncCutscenes"] = 0;
         payload["syncEnemyMovement"] = 0;
+        payload["playerUpdateRate"] = 20;
+        payload["enemyUpdateRate"] = 10;
     } else {
         payload["pvpMode"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.PvpMode"), 1);
         payload["showLocationsMode"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.ShowLocationsMode"), 1);
@@ -36,6 +38,8 @@ nlohmann::json Anchor::PrepRoomState() {
         payload["syncEnemies"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncEnemies"), 1);
         payload["syncCutscenes"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncCutscenes"), 2);
         payload["syncEnemyMovement"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncEnemyMovement"), 1);
+        payload["playerUpdateRate"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.PlayerUpdateRate"), 20);
+        payload["enemyUpdateRate"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.EnemyUpdateRate"), 10);
     }
 
     return payload;
@@ -65,4 +69,6 @@ void Anchor::HandlePacket_UpdateRoomState(nlohmann::json payload) {
     roomState.syncEnemies = payload["state"].value("syncEnemies", (u8)0);
     roomState.syncCutscenes = payload["state"].value("syncCutscenes", (u8)0);
     roomState.syncEnemyMovement = payload["state"].value("syncEnemyMovement", (u8)0);
+    roomState.playerUpdateRate = payload["state"].value("playerUpdateRate", (u8)20);
+    roomState.enemyUpdateRate = payload["state"].value("enemyUpdateRate", (u8)10);
 }

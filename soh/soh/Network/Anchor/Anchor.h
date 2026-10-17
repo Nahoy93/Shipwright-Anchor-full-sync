@@ -75,6 +75,8 @@ typedef struct {
     u8 syncEnemies;       // 0 = off, 1 = enemies and bosses killed by a teammate die for everyone in the same area
     u8 syncCutscenes;     // 0 = off, 1 = teammates in the same area, 2 = all teammates (pulled to the cutscene)
     u8 syncEnemyMovement; // 0 = off, 1 = enemy positions and health follow one player per room (experimental)
+    u8 playerUpdateRate;  // Player position/animation updates sent per second (1-20)
+    u8 enemyUpdateRate;   // Enemy snapshots sent per second (1-20)
 } RoomState;
 
 class Anchor : public Network {
@@ -150,6 +152,8 @@ class Anchor : public Network {
     void HandlePacket_EnemySync(nlohmann::json payload);
     void HandlePacket_EnemyHit(nlohmann::json payload);
     void SendPacket_EnemySync();
+    // Converts an "updates per second" room setting to "send every N game updates" (the game runs 20 updates/sec)
+    static uint32_t RateToInterval(u8 perSecond);
 
   public:
     uint32_t ownClientId;
@@ -274,6 +278,10 @@ typedef enum {
     DUMMY_PLAYER_HIT_RESPONSE_FIRE,
     DUMMY_PLAYER_HIT_RESPONSE_NORMAL,
 } DummyPlayerDamageResponseType;
+
+// Saved sessions (connection presets), see Sessions.cpp
+void AnchorSessionsMenu(bool isEnabled);
+void AnchorSessions_RecordSaveFile(int32_t fileNum);
 
 class AnchorRoomWindow : public Ship::GuiWindow {
   public:

@@ -28,6 +28,8 @@ void AnchorMainMenu(WidgetInfo& info) {
     bool isFormValid = !SohUtils::IsStringEmpty(host) && port > 1024 && port < 65535 &&
                        !SohUtils::IsStringEmpty(anchorRoomId) && !SohUtils::IsStringEmpty(anchorName);
 
+    AnchorSessionsMenu(anchor->isEnabled);
+
     ImGui::SeparatorText("Connection Settings");
 
     ImGui::BeginDisabled(anchor->isEnabled);
@@ -266,6 +268,30 @@ void AnchorAdminMenu(WidgetInfo& info) {
                                              "Bosses only share their health."))) {
         anchor->SendPacket_UpdateRoomState();
     }
+    ImGui::SeparatorText("Sync Rate");
+    if (UIWidgets::CVarSliderInt("Player Updates Per Second: %d", CVAR_REMOTE_ANCHOR("RoomSettings.PlayerUpdateRate"),
+                                 UIWidgets::IntSliderOptions()
+                                     .Min(1)
+                                     .Max(20)
+                                     .DefaultValue(20)
+                                     .Color(THEME_COLOR)
+                                     .Tooltip("How often each player sends their position and animation. 20 is the "
+                                              "smoothest (every game update). Lower it if someone has a slow "
+                                              "connection."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
+    if (UIWidgets::CVarSliderInt("Enemy Updates Per Second: %d", CVAR_REMOTE_ANCHOR("RoomSettings.EnemyUpdateRate"),
+                                 UIWidgets::IntSliderOptions()
+                                     .Min(1)
+                                     .Max(20)
+                                     .DefaultValue(10)
+                                     .Color(THEME_COLOR)
+                                     .Tooltip("How often the player leading a room sends the enemies' positions and "
+                                              "health. Higher is smoother but uses more bandwidth."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
+
+    ImGui::SeparatorText("Cutscenes");
     if (UIWidgets::CVarCombobox(
             "Share Cutscenes With:", CVAR_REMOTE_ANCHOR("RoomSettings.SyncCutscenes"), cutsceneSyncModes,
             UIWidgets::ComboboxOptions()
