@@ -41,9 +41,9 @@ jobs:
       - name: Package
         run: |
           # Windows: game + data file + server + start script + guide, ready to unzip
-          mkdir -p "pkg/Zelda MP Co-op/Spelbart" "pkg/Zelda MP Co-op/Server"
-          cp -r dl/soh-windows/. "pkg/Zelda MP Co-op/Spelbart/"
-          cp out/anchor.exe coop/"Starta server.bat" "pkg/Zelda MP Co-op/Server/"
+          mkdir -p "pkg/Zelda MP Co-op/Game" "pkg/Zelda MP Co-op/Server"
+          cp -r dl/soh-windows/. "pkg/Zelda MP Co-op/Game/"
+          cp out/anchor.exe coop/"Start server.bat" "pkg/Zelda MP Co-op/Server/"
           cp coop/*.md "pkg/Zelda MP Co-op/"
           (cd pkg && zip -qr "../out/Zelda-MP-Coop-Windows.zip" "Zelda MP Co-op")
           (cd dl/soh-linux-x86_64 && zip -qr ../../out/soh-linux-x86_64.zip .)
@@ -57,5 +57,5 @@ jobs:
           gh release delete "$TAG" -R "$REPO" -y --cleanup-tag || true
           gh release create "$TAG" -R "$REPO" --target "$GITHUB_SHA" \
             --title "Zelda MP Co-op $TAG" \
-            --notes-file "coop/LÄS MIG - Co-op och egen server.md" \
+            --notes-file "coop/README - Co-op and private server.md" \
             out/*
