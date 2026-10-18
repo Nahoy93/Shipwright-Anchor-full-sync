@@ -211,6 +211,14 @@ void Anchor::ProcessIncomingPacketQueue() {
                 HandlePacket_GameOverChoice(payload);
             else if (packetType == TRADE_TIMER)
                 HandlePacket_TradeTimer(payload);
+            else if (packetType == WEATHER)
+                HandlePacket_Weather(payload);
+            else if (packetType == SONG_LEARNED)
+                HandlePacket_SongLearned(payload);
+            else if (packetType == BOSS_ROOM)
+                HandlePacket_BossRoom(payload);
+            else if (packetType == AGE_CHANGED)
+                HandlePacket_AgeChanged(payload);
             else if (packetType == PLAYER_DOWN)
                 HandlePacket_PlayerDown(payload);
             else if (packetType == PLAYER_REVIVED)

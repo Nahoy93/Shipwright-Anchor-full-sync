@@ -138,6 +138,12 @@ void Anchor::Coop_OnGameFrame() {
     Coop_ApplyPendingRoomKills();
     Coop_UpdateGameOver();
     Coop_UpdateTradeTimer();
+    Coop_UpdateWarpBlocks();
+    Coop_UpdateWeather();
+    Coop_UpdateSongLearning();
+    Coop_UpdateBossRoom();
+    Coop_UpdateSharedAge();
+    Coop_UpdateSpectator();
 }
 
 void Anchor::Coop_OnPlayerUpdate() {

@@ -40,6 +40,12 @@ nlohmann::json Anchor::PrepRoomState() {
         payload["syncPlatforms"] = 0;
         payload["syncGameOver"] = 0;
         payload["syncTradeTimers"] = 0;
+        payload["syncWeather"] = 0;
+        payload["syncSongTeaching"] = 0;
+        payload["syncBossIntros"] = 0;
+        payload["syncAge"] = 0;
+        payload["syncCollision"] = 0;
+        payload["syncAnimals"] = 0;
     } else {
         payload["pvpMode"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.PvpMode"), 1);
         payload["showLocationsMode"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.ShowLocationsMode"), 1);
@@ -64,6 +70,12 @@ nlohmann::json Anchor::PrepRoomState() {
         payload["syncPlatforms"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncPlatforms"), 1);
         payload["syncGameOver"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncGameOver"), 1);
         payload["syncTradeTimers"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncTradeTimers"), 1);
+        payload["syncWeather"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncWeather"), 1);
+        payload["syncSongTeaching"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncSongTeaching"), 1);
+        payload["syncBossIntros"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncBossIntros"), 1);
+        payload["syncAge"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncAge"), 1);
+        payload["syncCollision"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncCollision"), 1);
+        payload["syncAnimals"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncAnimals"), 1);
     }
 
     return payload;
@@ -107,4 +119,10 @@ void Anchor::HandlePacket_UpdateRoomState(nlohmann::json payload) {
     roomState.syncPlatforms = payload["state"].value("syncPlatforms", (u8)0);
     roomState.syncGameOver = payload["state"].value("syncGameOver", (u8)0);
     roomState.syncTradeTimers = payload["state"].value("syncTradeTimers", (u8)0);
+    roomState.syncWeather = payload["state"].value("syncWeather", (u8)0);
+    roomState.syncSongTeaching = payload["state"].value("syncSongTeaching", (u8)0);
+    roomState.syncBossIntros = payload["state"].value("syncBossIntros", (u8)0);
+    roomState.syncAge = payload["state"].value("syncAge", (u8)0);
+    roomState.syncCollision = payload["state"].value("syncCollision", (u8)0);
+    roomState.syncAnimals = payload["state"].value("syncAnimals", (u8)0);
 }

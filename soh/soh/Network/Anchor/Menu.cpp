@@ -168,6 +168,12 @@ void AnchorMainMenu(WidgetInfo& info) {
                            "Visibility is restricted according to the Show Locations mode for the room."
                          : "Cannot show other players because the room's Show Locations mode is set to None."));
     ImGui::EndDisabled();
+    UIWidgets::CVarCheckbox("Spectate Teammates While Down", CVAR_REMOTE_ANCHOR("Coop.Spectate"),
+                            UIWidgets::CheckboxOptions()
+                                .Color(THEME_COLOR)
+                                .DefaultValue(true)
+                                .Tooltip("While you are down, the camera follows a teammate in the same area. "
+                                         "Press L to switch teammate."));
 
     ImGui::Spacing();
 
@@ -345,6 +351,53 @@ void AnchorAdminMenu(WidgetInfo& info) {
                                     .Color(THEME_COLOR)
                                     .Tooltip("The Odd Mushroom, Frog and Eye Drops timers start and stop for everyone "
                                              "carrying the same item."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
+    if (UIWidgets::CVarCheckbox(
+            "Shared Weather", CVAR_REMOTE_ANCHOR("RoomSettings.SyncWeather"),
+            UIWidgets::CheckboxOptions()
+                .DefaultValue(true)
+                .Color(THEME_COLOR)
+                .Tooltip("Rain, storms, lightning and dark skies are the same for everyone in the area."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
+    if (UIWidgets::CVarCheckbox(
+            "Teach Learned Songs", CVAR_REMOTE_ANCHOR("RoomSettings.SyncSongTeaching"),
+            UIWidgets::CheckboxOptions()
+                .DefaultValue(true)
+                .Color(THEME_COLOR)
+                .Tooltip("When a teammate learns a song, everyone gets it, with the teacher's demonstration."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
+    if (UIWidgets::CVarCheckbox("Gather For Boss Intros", CVAR_REMOTE_ANCHOR("RoomSettings.SyncBossIntros"),
+                                UIWidgets::CheckboxOptions()
+                                    .DefaultValue(true)
+                                    .Color(THEME_COLOR)
+                                    .Tooltip("When a teammate enters a boss room, everyone in the same dungeon is "
+                                             "brought there for the intro."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
+    if (UIWidgets::CVarCheckbox(
+            "Shared Age", CVAR_REMOTE_ANCHOR("RoomSettings.SyncAge"),
+            UIWidgets::CheckboxOptions()
+                .DefaultValue(true)
+                .Color(THEME_COLOR)
+                .Tooltip("Becoming a child or an adult in the Temple of Time changes the age of the whole team."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
+    if (UIWidgets::CVarCheckbox(
+            "Teammates Block You", CVAR_REMOTE_ANCHOR("RoomSettings.SyncCollision"),
+            UIWidgets::CheckboxOptions()
+                .DefaultValue(true)
+                .Color(THEME_COLOR)
+                .Tooltip("Teammates' figures are solid and block you like a wall (not while someone is down)."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
+    if (UIWidgets::CVarCheckbox("Shared Animals", CVAR_REMOTE_ANCHOR("RoomSettings.SyncAnimals"),
+                                UIWidgets::CheckboxOptions()
+                                    .DefaultValue(true)
+                                    .Color(THEME_COLOR)
+                                    .Tooltip("Cuccos and horses in the area are in the same place for everyone."))) {
         anchor->SendPacket_UpdateRoomState();
     }
 

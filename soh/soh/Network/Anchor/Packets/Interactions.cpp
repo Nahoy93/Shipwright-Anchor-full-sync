@@ -57,6 +57,7 @@ struct WorldObjectNet {
     s16 lastTorchTimer = 0;
     bool wasCut = false;
     bool initialized = false;
+    uint32_t localControlUntil = 0; // an animal we hold or just threw: we send it even if we're not the leader
 };
 static ObjectExtension::Register<WorldObjectNet> WorldObjectNetRegister;
 
@@ -244,8 +245,13 @@ static bool IsBreakable(s16 id) {
 
 // Objects that move continuously by themselves. Only the teammate with the lowest id sends them, or two players would
 // keep correcting each other.
+// Animals that wander around (room setting "Shared Animals")
+static bool IsAnimal(s16 id) {
+    return id == ACTOR_EN_NIW || id == ACTOR_EN_HORSE_NORMAL;
+}
+
 static bool IsAutoMover(s16 id) {
-    return id == ACTOR_EN_GOROIWA;
+    return id == ACTOR_EN_GOROIWA || IsAnimal(id);
 }
 
 // Background actors that move on their own (platforms, elevators, rotating parts of rooms). Water levels and the Forest
@@ -374,7 +380,8 @@ void Anchor::Interactions_ShouldActorUpdate(Actor* actor, bool* should) {
         if (Interactions_IsHorseMirror(actor)) {
             *should = false;
         }
-    } else if (IsMovableObject(actor->id) || actor->category == ACTORCAT_BG) {
+    } else if ((IsMovableObject(actor->id) && !IsAnimal(actor->id)) || actor->category == ACTORCAT_BG) {
+        // (Animals keep running their own logic so they stay animated, their position is corrected)
         WorldObjectNet* net = ObjectExtension::GetInstance().Get<WorldObjectNet>(actor);
         if (net != nullptr && net->puppetUntil > coop.frameCounter) {
             *should = false;
@@ -412,6 +419,24 @@ void Anchor::Interactions_OnActorKill(Actor* actor) {
 // MARK: - Per frame
 
 static void CleanupHorseMirrors();
+
+// An animal we're carrying, or threw less than three seconds ago
+static bool IsLocallyControlled(Actor* actor) {
+    if (!IsAnimal(actor->id)) {
+        return false;
+    }
+    WorldObjectNet* net = ObjectExtension::GetInstance().Get<WorldObjectNet>(actor);
+    uint32_t now = Anchor::Instance->coop.frameCounter;
+    if (IsHeldByLocalPlayer(actor)) {
+        if (net == nullptr) {
+            ObjectExtension::GetInstance().Set<WorldObjectNet>(actor, WorldObjectNet{});
+            net = ObjectExtension::GetInstance().Get<WorldObjectNet>(actor);
+        }
+        net->localControlUntil = now + 60;
+        return true;
+    }
+    return net != nullptr && net->localControlUntil > now;
+}
 
 void Anchor::Coop_UpdateInteractions() {
     CleanupHorseMirrors();
@@ -481,7 +506,8 @@ void Anchor::Coop_UpdateInteractions() {
             } else if (IsMovableObject(actor->id) && IsInCurrentRoom(actor) &&
                        // Only the bomb itself moves, not the flower, and not while it explodes
                        !(actor->id == ACTOR_EN_BOMBF && actor->params != BOMBFLOWER_BODY) &&
-                       !(IsAutoMover(actor->id) && !Coop_IsLowestIdInScene())) {
+                       !(IsAnimal(actor->id) && !roomState.syncAnimals) &&
+                       !(IsAutoMover(actor->id) && !Coop_IsLowestIdInScene() && !IsLocallyControlled(actor))) {
                 WorldObjectNet* net = ObjectExtension::GetInstance().Get<WorldObjectNet>(actor);
                 if (net == nullptr) {
                     ObjectExtension::GetInstance().Set<WorldObjectNet>(actor, WorldObjectNet{});
@@ -726,7 +752,7 @@ void Anchor::HandlePacket_WorldObjects(nlohmann::json payload) {
             sApplyingRemote = false;
         }
 
-        if (actor == nullptr || IsHeldByLocalPlayer(actor)) {
+        if (actor == nullptr || IsHeldByLocalPlayer(actor) || IsLocallyControlled(actor)) {
             continue;
         }
 

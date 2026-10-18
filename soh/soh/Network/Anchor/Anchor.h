@@ -101,6 +101,12 @@ typedef struct {
     u8 syncPlatforms;       // 0 = off, 1 = moving platforms and elevators follow the room leader
     u8 syncGameOver;        // 0 = off, 1 = the first answer in the game over menu counts for the whole team
     u8 syncTradeTimers;     // 0 = off, 1 = trade quest timers (Odd Mushroom, Frog, Eye Drops) are shared
+    u8 syncWeather;         // 0 = off, 1 = rain, storms and dark skies follow the teammate with the lowest id
+    u8 syncSongTeaching;    // 0 = off, 1 = songs a teammate learns are taught to everyone
+    u8 syncBossIntros;      // 0 = off, 1 = the team is brought to the boss room when someone enters it
+    u8 syncAge;             // 0 = off, 1 = changing age in the Temple of Time changes everyone's age
+    u8 syncCollision;       // 0 = off, 1 = teammates' figures block you like a wall
+    u8 syncAnimals;         // 0 = off, 1 = Cuccos and horses in the area follow the teammate with the lowest id
 } RoomState;
 
 class Anchor : public Network {
@@ -221,6 +227,18 @@ class Anchor : public Network {
     void Coop_UpdateTradeTimer();
     void HandlePacket_GameOverChoice(nlohmann::json payload);
     void HandlePacket_TradeTimer(nlohmann::json payload);
+    // Batch 4
+    void Coop_OnRemoteSwitchFlag(s16 sceneNum, s16 flag);
+    void Coop_UpdateWarpBlocks();
+    void Coop_UpdateWeather();
+    void HandlePacket_Weather(nlohmann::json payload);
+    void Coop_UpdateSongLearning();
+    void HandlePacket_SongLearned(nlohmann::json payload);
+    void Coop_UpdateBossRoom();
+    void HandlePacket_BossRoom(nlohmann::json payload);
+    void Coop_UpdateSharedAge();
+    void HandlePacket_AgeChanged(nlohmann::json payload);
+    void Coop_UpdateSpectator();
 
   public:
     uint32_t ownClientId;
@@ -274,6 +292,10 @@ class Anchor : public Network {
     inline static const std::string WARP_SPAWNED = "WARP_SPAWNED";
     inline static const std::string GAME_OVER_CHOICE = "GAME_OVER_CHOICE";
     inline static const std::string TRADE_TIMER = "TRADE_TIMER";
+    inline static const std::string WEATHER = "WEATHER";
+    inline static const std::string SONG_LEARNED = "SONG_LEARNED";
+    inline static const std::string BOSS_ROOM = "BOSS_ROOM";
+    inline static const std::string AGE_CHANGED = "AGE_CHANGED";
 
     // Co-op runtime state (game thread only)
     struct CoopState {

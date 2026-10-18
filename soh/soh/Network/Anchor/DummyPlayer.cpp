@@ -196,9 +196,13 @@ void DummyPlayer_Update(Actor* actor, PlayState* play) {
 
     Collider_UpdateCylinder(&player->actor, &player->cylinder);
 
+    // Room setting: teammates are solid. Never while someone is down, so nobody gets stuck next to a downed player.
+    bool solid = Anchor::Instance->roomState.syncCollision && !client.isDown && !Anchor::Instance->coop.isDown;
+    bool pushable = !Anchor::Instance->roomState.syncCollision;
+
     if (!(player->stateFlags2 & PLAYER_STATE2_FROZEN)) {
-        if (!(player->stateFlags1 & (PLAYER_STATE1_DEAD | PLAYER_STATE1_HANGING_OFF_LEDGE |
-                                     PLAYER_STATE1_CLIMBING_LEDGE | PLAYER_STATE1_ON_HORSE))) {
+        if ((solid || pushable) && !(player->stateFlags1 & (PLAYER_STATE1_DEAD | PLAYER_STATE1_HANGING_OFF_LEDGE |
+                                                            PLAYER_STATE1_CLIMBING_LEDGE | PLAYER_STATE1_ON_HORSE))) {
             CollisionCheck_SetOC(play, &play->colChkCtx, &player->cylinder.base);
         }
 
@@ -212,7 +216,7 @@ void DummyPlayer_Update(Actor* actor, PlayState* play) {
         }
     }
 
-    if (player->stateFlags1 & (PLAYER_STATE1_DEAD | PLAYER_STATE1_IN_ITEM_CS | PLAYER_STATE1_IN_CUTSCENE)) {
+    if (solid || (player->stateFlags1 & (PLAYER_STATE1_DEAD | PLAYER_STATE1_IN_ITEM_CS | PLAYER_STATE1_IN_CUTSCENE))) {
         player->actor.colChkInfo.mass = MASS_IMMOVABLE;
     } else {
         player->actor.colChkInfo.mass = 50;
