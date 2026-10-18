@@ -1,3 +1,9 @@
+#include <algorithm>
+#include <map>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <vector>
 #include "Anchor.h"
 #include "soh/Enhancements/game-interactor/GameInteractor.h"
 #include "soh/Notification/Notification.h"

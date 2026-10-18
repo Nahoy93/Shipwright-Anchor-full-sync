@@ -1,4 +1,10 @@
 #include <nlohmann/json.hpp>
+#include <algorithm>
+#include <map>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "soh/Network/Anchor/Anchor.h"
 #include "soh/Network/Anchor/JsonConversions.hpp"
@@ -64,7 +70,7 @@ void Anchor::SendPacket_CutsceneStart() {
     }
 
     Player* player = GET_PLAYER(gPlayState);
-    u16 cutsceneIndex = gSaveContext.cutsceneIndex;
+    u16 cutsceneIndex = (u16)gSaveContext.cutsceneIndex;
 
     nlohmann::json payload;
     payload["type"] = CUTSCENE_START;
@@ -153,7 +159,7 @@ void Anchor::Coop_ProcessPendingCutscene() {
         coop.hasPendingCutscene = false;
         coop.recentCutscenes[CutsceneKey(payload)] = coop.frameCounter;
 
-        gPlayState->nextEntranceIndex = payload.at("entranceIndex").get<s32>();
+        gPlayState->nextEntranceIndex = payload.at("entranceIndex").get<s16>();
         gSaveContext.nextCutsceneIndex = payload.at("cutsceneIndex").get<u16>();
         gPlayState->transitionTrigger = TRANS_TRIGGER_START;
         gPlayState->transitionType = TRANS_TYPE_FADE_WHITE;
@@ -196,10 +202,10 @@ void Anchor::Coop_ProcessPendingCutscene() {
 
     // Same teleport as TELEPORT_TO: respawn at the teammate's position in their scene
     PosRot posRot = payload.at("posRot").get<PosRot>();
-    gPlayState->nextEntranceIndex = entranceIndex;
+    gPlayState->nextEntranceIndex = (s16)entranceIndex;
     gPlayState->transitionTrigger = TRANS_TRIGGER_START;
     gPlayState->transitionType = TRANS_TYPE_FADE_WHITE;
-    gSaveContext.respawn[RESPAWN_MODE_DOWN].entranceIndex = entranceIndex;
+    gSaveContext.respawn[RESPAWN_MODE_DOWN].entranceIndex = (s16)entranceIndex;
     gSaveContext.respawn[RESPAWN_MODE_DOWN].roomIndex = roomIndex;
     gSaveContext.respawn[RESPAWN_MODE_DOWN].pos = posRot.pos;
     gSaveContext.respawn[RESPAWN_MODE_DOWN].yaw = posRot.rot.y;

@@ -1,4 +1,10 @@
 #include <nlohmann/json.hpp>
+#include <algorithm>
+#include <map>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "soh/Network/Anchor/Anchor.h"
 #include "soh/Network/Anchor/JsonConversions.hpp"
@@ -56,7 +62,7 @@ static std::string SongName(uint8_t song) {
 void Anchor::Coop_UpdateSongWatch() {
     u8 msgMode = gPlayState->msgCtx.msgMode;
     if (msgMode != sLastMsgMode && msgMode == MSGMODE_SETUP_DISPLAY_SONG_PLAYED) {
-        uint8_t song = gPlayState->msgCtx.lastPlayedSong;
+        uint8_t song = (uint8_t)gPlayState->msgCtx.lastPlayedSong;
         // Warp songs are sent once the warp actually happens (the player can still say no)
         if (song > OCARINA_SONG_PRELUDE) {
             SendPacket_OcarinaSong(song);

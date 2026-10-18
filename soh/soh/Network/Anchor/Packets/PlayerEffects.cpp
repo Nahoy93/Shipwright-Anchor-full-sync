@@ -1,4 +1,10 @@
 #include <nlohmann/json.hpp>
+#include <algorithm>
+#include <map>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "soh/Network/Anchor/Anchor.h"
 
@@ -45,7 +51,7 @@ void Anchor_DummyPlayerEffects(Player* player, AnchorClient& client) {
         static Color_RGBA8 envColor = { 255, 50, 0, 0 };
         f32 scale = client.stickFlame < 20 ? client.stickFlame / 20.0f : 1.0f;
         func_8002836C(gPlayState, &player->meleeWeaponInfo[0].tip, &velocity, &accel, &primColor, &envColor,
-                      scale * 200.0f, 0, 8);
+                      (s16)(scale * 200.0f), 0, 8);
     }
 
     // On fire: flames on a couple of random body parts, positioned relative to the figure so they follow it

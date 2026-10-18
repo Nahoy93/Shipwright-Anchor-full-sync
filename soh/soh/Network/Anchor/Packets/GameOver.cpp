@@ -1,4 +1,10 @@
 #include <nlohmann/json.hpp>
+#include <algorithm>
+#include <map>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "soh/Network/Anchor/Anchor.h"
 #include "soh/Notification/Notification.h"
@@ -97,7 +103,7 @@ void Anchor::Coop_UpdateGameOver() {
                    (state == GAMEOVER_MENU_SAVED || state == GAMEOVER_MENU_CONTINUE_PROMPT)) {
             SendChoice(this, "save", state == GAMEOVER_MENU_SAVED ? 0 : 1);
         } else if (sLastPauseState == GAMEOVER_MENU_CONTINUE_PROMPT && state == GAMEOVER_MENU_FADE_OUT) {
-            SendChoice(this, "continue", pauseCtx->promptChoice);
+            SendChoice(this, "continue", (u8)pauseCtx->promptChoice);
         }
     }
     sLastPauseState = state;

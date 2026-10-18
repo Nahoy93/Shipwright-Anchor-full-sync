@@ -1,4 +1,7 @@
 #include <nlohmann/json.hpp>
+#include <algorithm>
+#include <map>
+#include <string>
 #include <set>
 #include <unordered_map>
 #include <vector>
@@ -94,9 +97,9 @@ static std::unordered_map<Actor*, MirrorFuncs> sMirrorFuncs;
 // Magic actors reset the local player's magic (and Nayru's Love) when they are created or removed. Mirrors must not
 // touch the local player's state, so save and restore it around them.
 struct LocalMagicState {
-    u8 magicState;
-    u8 prevMagicState;
-    u16 nayrusLoveTimer;
+    s16 magicState;
+    s16 prevMagicState;
+    s16 nayrusLoveTimer;
 };
 static LocalMagicState SaveLocalMagic() {
     return { gSaveContext.magicState, gSaveContext.prevMagicState, gSaveContext.nayrusLoveTimer };

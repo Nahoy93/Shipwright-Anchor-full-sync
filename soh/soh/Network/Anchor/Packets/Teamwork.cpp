@@ -1,4 +1,10 @@
 #include <nlohmann/json.hpp>
+#include <algorithm>
+#include <map>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "soh/Network/Anchor/Anchor.h"
 #include "soh/Notification/Notification.h"
@@ -138,7 +144,7 @@ void Anchor::HandlePacket_SongLearned(nlohmann::json payload) {
         return;
     }
 
-    Item_Give(gPlayState, ITEM_SONG_MINUET + song);
+    Item_Give(gPlayState, (u8)(ITEM_SONG_MINUET + song));
     sKnownSongs |= 1 << song; // don't send it back
     sPendingLessons.push_back({ song, payload.value("clientId", (uint32_t)0), coop.frameCounter + PENDING_FRAMES });
 }
@@ -200,7 +206,7 @@ void Anchor::Coop_UpdateBossRoom() {
     }
 
     sHasPendingBossRoom = false;
-    gPlayState->nextEntranceIndex = sPendingBossRoom.at("entranceIndex").get<s32>();
+    gPlayState->nextEntranceIndex = sPendingBossRoom.at("entranceIndex").get<s16>();
     gPlayState->transitionTrigger = TRANS_TRIGGER_START;
     gPlayState->transitionType = TRANS_TYPE_FADE_BLACK;
     Notification::Emit({ .prefix = NameOf(this, sPendingBossRoom.value("clientId", (uint32_t)0)),
@@ -263,8 +269,8 @@ void Anchor::Coop_UpdateSharedAge() {
 
     sHasPendingAge = false;
     sReportedAge = age; // don't send it back
-    gPlayState->nextEntranceIndex = sPendingAge.at("entranceIndex").get<s32>();
-    gPlayState->linkAgeOnLoad = age;
+    gPlayState->nextEntranceIndex = sPendingAge.at("entranceIndex").get<s16>();
+    gPlayState->linkAgeOnLoad = (u8)age;
     gPlayState->transitionTrigger = TRANS_TRIGGER_START;
     gPlayState->transitionType = TRANS_TYPE_FADE_WHITE;
     gSaveContext.nextTransitionType = TRANS_TYPE_FADE_WHITE_SLOW;
