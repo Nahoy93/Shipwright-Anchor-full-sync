@@ -1,11 +1,11 @@
 name: coop-release
 
-# Push a tag named coop-v* to publish a release with the latest successful
-# build of the zelda-mp-coop branch and the Anchor server (with password support).
+# Push to the coop-release branch to publish a release (version from coop/VERSION) with the
+# latest successful build of the zelda-mp-coop branch and the Anchor server (with password support).
 on:
   push:
-    tags:
-      - "coop-v*"
+    branches:
+      - coop-release
 
 permissions:
   contents: write
@@ -53,7 +53,9 @@ jobs:
 
       - name: Publish release
         run: |
-          gh release create "$GITHUB_REF_NAME" -R "$REPO" --target "$GITHUB_SHA" \
-            --title "Zelda MP Co-op $GITHUB_REF_NAME" \
+          TAG="coop-v$(tr -d '[:space:]' < coop/VERSION)"
+          gh release delete "$TAG" -R "$REPO" -y --cleanup-tag || true
+          gh release create "$TAG" -R "$REPO" --target "$GITHUB_SHA" \
+            --title "Zelda MP Co-op $TAG" \
             --notes-file "coop/LÄS MIG - Co-op och egen server.md" \
             out/*
