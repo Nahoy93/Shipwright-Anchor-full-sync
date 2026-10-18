@@ -1,0 +1,59 @@
+name: coop-release
+
+# Push a tag named coop-v* to publish a release with the latest successful
+# build of the zelda-mp-coop branch and the Anchor server (with password support).
+on:
+  push:
+    tags:
+      - "coop-v*"
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the latest successful game build
+        run: |
+          RUN_ID=$(gh run list -R "$REPO" --workflow generate-builds.yml --branch zelda-mp-coop --status success -L 1 --json databaseId -q '.[0].databaseId')
+          echo "Using build run $RUN_ID"
+          mkdir -p dl out
+          gh run download "$RUN_ID" -R "$REPO" -D dl
+          ls -R dl | head -50
+
+      - name: Build the Anchor server
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - run: |
+          git clone --depth 1 https://github.com/Nahoy93/Anchor-full-sync-test server
+          cd server
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o ../out/anchor.exe .
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o ../out/anchor-linux-x64 .
+
+      - name: Package
+        run: |
+          # Windows: game + data file + server + start script + guide, ready to unzip
+          mkdir -p "pkg/Zelda MP Co-op/Spelbart" "pkg/Zelda MP Co-op/Server"
+          cp -r dl/soh-windows/. "pkg/Zelda MP Co-op/Spelbart/"
+          cp out/anchor.exe coop/"Starta server.bat" "pkg/Zelda MP Co-op/Server/"
+          cp coop/*.md "pkg/Zelda MP Co-op/"
+          (cd pkg && zip -qr "../out/Zelda-MP-Coop-Windows.zip" "Zelda MP Co-op")
+          (cd dl/soh-linux-x86_64 && zip -qr ../../out/soh-linux-x86_64.zip .)
+          (cd dl/soh-linux-aarch64 && zip -qr ../../out/soh-linux-aarch64.zip .)
+          if [ -d dl/soh-mac ]; then (cd dl/soh-mac && zip -qr ../../out/soh-mac.zip .); fi
+          ls -la out
+
+      - name: Publish release
+        run: |
+          gh release create "$GITHUB_REF_NAME" -R "$REPO" --target "$GITHUB_SHA" \
+            --title "Zelda MP Co-op $GITHUB_REF_NAME" \
+            --notes-file "coop/LÄS MIG - Co-op och egen server.md" \
+            out/*
