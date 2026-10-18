@@ -1,5 +1,6 @@
 #include <nlohmann/json.hpp>
 #include <set>
+#include <vector>
 
 #include "soh/Network/Anchor/Anchor.h"
 #include "soh/Network/Anchor/JsonConversions.hpp"
@@ -25,6 +26,16 @@ extern PlayState* gPlayState;
  */
 
 static bool sSpawningRemoteWarp = false;
+
+struct PendingRoomKill {
+    s8 roomNum;
+    s16 actorId;
+    s16 params;
+    Vec3f home;
+    uint32_t killer;
+    s16 sceneNum;
+};
+static std::vector<PendingRoomKill> sPendingRoomKills;
 
 static void KillActorWithEffect(Actor* actor) {
     static Vec3f zeroVec = { 0.0f, 0.0f, 0.0f };
@@ -103,6 +114,41 @@ void Anchor::HandlePacket_EnemyDefeated(nlohmann::json payload) {
             return;
         }
         actor = actor->next;
+    }
+
+    // Not here: the teammate is in a room we don't have loaded. Remember the kill so the enemy is already dead when we
+    // enter that room, for as long as the teammate stays there (rooms refill with enemies once everyone has left).
+    sPendingRoomKills.push_back(
+        { roomNum, actorId, params, home, payload.value("clientId", (uint32_t)0), gPlayState->sceneNum });
+}
+
+void Anchor::Coop_ApplyPendingRoomKills() {
+    if (sPendingRoomKills.empty() || !IsSaveLoaded()) {
+        return;
+    }
+
+    for (auto it = sPendingRoomKills.begin(); it != sPendingRoomKills.end();) {
+        bool killerStillThere = it->sceneNum == gPlayState->sceneNum && clients.contains(it->killer) &&
+                                clients[it->killer].online && clients[it->killer].sceneNum == it->sceneNum &&
+                                clients[it->killer].curRoomNum == it->roomNum;
+        if (!killerStillThere) {
+            it = sPendingRoomKills.erase(it);
+            continue;
+        }
+
+        if (it->roomNum == gPlayState->roomCtx.curRoom.num) {
+            Actor* actor = gPlayState->actorCtx.actorLists[ACTORCAT_ENEMY].head;
+            while (actor != nullptr) {
+                if (actor->update != nullptr && actor->id == it->actorId && actor->params == it->params &&
+                    actor->room == it->roomNum && Math_Vec3f_DistXYZ(&actor->home.pos, &it->home) < 1.0f) {
+                    // Quietly, it died before we got here
+                    Actor_Kill(actor);
+                    break;
+                }
+                actor = actor->next;
+            }
+        }
+        ++it;
     }
 }
 

@@ -5,6 +5,7 @@
 extern "C" {
 #include "macros.h"
 #include "variables.h"
+#include "src/overlays/actors/ovl_En_Horse/z_en_horse.h"
 extern PlayState* gPlayState;
 }
 
@@ -79,6 +80,22 @@ void Anchor::SendPacket_PlayerUpdate() {
     payload["isBurning"] = (bool)player->bodyIsBurning;
     payload["isShocked"] = player->bodyShockTimer != 0;
     payload["lensActive"] = gPlayState->actorCtx.lensActive && gSaveContext.magicState == MAGIC_STATE_CONSUME_LENS;
+    // Epona, so teammates see the horse under the figure
+    if ((player->stateFlags1 & PLAYER_STATE1_ON_HORSE) && player->rideActor != nullptr &&
+        player->rideActor->id == ACTOR_EN_HORSE) {
+        EnHorse* horse = (EnHorse*)player->rideActor;
+        SkelAnime* skelAnime = &horse->skin.skelAnime;
+        std::vector<s16> horseJoints;
+        for (s32 i = 0; i < skelAnime->limbCount && skelAnime->jointTable != nullptr; i++) {
+            horseJoints.push_back(skelAnime->jointTable[i].x);
+            horseJoints.push_back(skelAnime->jointTable[i].y);
+            horseJoints.push_back(skelAnime->jointTable[i].z);
+        }
+        payload["horse"]["params"] = horse->actor.params;
+        payload["horse"]["pos"] = horse->actor.world.pos;
+        payload["horse"]["rotY"] = horse->actor.shape.rot.y;
+        payload["horse"]["joints"] = horseJoints;
+    }
     payload["quiet"] = true;
 
     for (auto& [clientId, client] : clients) {
@@ -132,5 +149,13 @@ void Anchor::HandlePacket_PlayerUpdate(nlohmann::json payload) {
         client.isBurning = payload.value("isBurning", false);
         client.isShocked = payload.value("isShocked", false);
         client.lensActive = payload.value("lensActive", false);
+        client.horseActive = payload.contains("horse");
+        if (client.horseActive) {
+            auto& horse = payload["horse"];
+            client.horseParams = horse.value("params", (s16)0);
+            client.horsePos = horse.value("pos", Vec3f{ 0 });
+            client.horseRotY = horse.value("rotY", (s16)0);
+            client.horseJoints = horse.value("joints", std::vector<s16>{});
+        }
     }
 }

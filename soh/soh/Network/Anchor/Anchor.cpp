@@ -207,6 +207,10 @@ void Anchor::ProcessIncomingPacketQueue() {
                 HandlePacket_DropMove(payload);
             else if (packetType == DROP_GONE)
                 HandlePacket_DropGone(payload);
+            else if (packetType == GAME_OVER_CHOICE)
+                HandlePacket_GameOverChoice(payload);
+            else if (packetType == TRADE_TIMER)
+                HandlePacket_TradeTimer(payload);
             else if (packetType == PLAYER_DOWN)
                 HandlePacket_PlayerDown(payload);
             else if (packetType == PLAYER_REVIVED)

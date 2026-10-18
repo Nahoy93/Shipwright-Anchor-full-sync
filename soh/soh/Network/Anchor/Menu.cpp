@@ -310,6 +310,44 @@ void AnchorAdminMenu(WidgetInfo& info) {
         anchor->SendPacket_UpdateRoomState();
     }
 
+    if (UIWidgets::CVarCheckbox("Real Teammate Arrows & Boomerangs",
+                                CVAR_REMOTE_ANCHOR("RoomSettings.SyncRealProjectiles"),
+                                UIWidgets::CheckboxOptions()
+                                    .DefaultValue(true)
+                                    .Color(THEME_COLOR)
+                                    .Tooltip("Teammates' arrows and boomerangs fly and hit for real in your game "
+                                             "(otherwise they are only visual copies)."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
+
+    if (UIWidgets::CVarCheckbox("Shared Moving Platforms", CVAR_REMOTE_ANCHOR("RoomSettings.SyncPlatforms"),
+                                UIWidgets::CheckboxOptions()
+                                    .DefaultValue(true)
+                                    .Color(THEME_COLOR)
+                                    .Tooltip("Moving platforms and elevators are in the same place for everyone in the "
+                                             "room, following the teammate who joined first."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
+
+    if (UIWidgets::CVarCheckbox(
+            "Shared Game Over Menu", CVAR_REMOTE_ANCHOR("RoomSettings.SyncGameOver"),
+            UIWidgets::CheckboxOptions()
+                .DefaultValue(true)
+                .Color(THEME_COLOR)
+                .Tooltip(
+                    "With Team Death: the first teammate to answer Save? and Continue? answers for the whole team."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
+
+    if (UIWidgets::CVarCheckbox("Shared Trade Quest Timers", CVAR_REMOTE_ANCHOR("RoomSettings.SyncTradeTimers"),
+                                UIWidgets::CheckboxOptions()
+                                    .DefaultValue(true)
+                                    .Color(THEME_COLOR)
+                                    .Tooltip("The Odd Mushroom, Frog and Eye Drops timers start and stop for everyone "
+                                             "carrying the same item."))) {
+        anchor->SendPacket_UpdateRoomState();
+    }
+
     ImGui::SeparatorText("Ocarina");
     if (UIWidgets::CVarCheckbox(
             "Share Song Effects", CVAR_REMOTE_ANCHOR("RoomSettings.SyncSongs"),

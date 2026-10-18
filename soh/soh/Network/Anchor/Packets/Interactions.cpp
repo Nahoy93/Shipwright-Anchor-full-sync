@@ -14,6 +14,7 @@ extern "C" {
 #include "src/overlays/actors/ovl_Obj_Syokudai/z_obj_syokudai.h"
 #include "src/overlays/actors/ovl_En_Bombf/z_en_bombf.h"
 #include "src/overlays/actors/ovl_En_G_Switch/z_en_g_switch.h"
+#include "src/overlays/actors/ovl_En_Horse/z_en_horse.h"
 extern PlayState* gPlayState;
 void EnGSwitch_SilverRupeeIdle(EnGSwitch* this_, PlayState* play);
 void EnGSwitch_SilverRupeeCollected(EnGSwitch* this_, PlayState* play);
@@ -45,11 +46,13 @@ struct ProjectileNet {
     uint32_t projId = 0;
     uint32_t owner = 0;
     bool isMirror = false;
+    bool live = false; // A mirror that flies and hits things itself (arrows, seeds, nuts, boomerang)
 };
 static ObjectExtension::Register<ProjectileNet> ProjectileNetRegister;
 
 struct WorldObjectNet {
     Vec3f lastSent = { 0.0f, 0.0f, 0.0f };
+    Vec3s lastRot = { 0, 0, 0 };
     uint32_t puppetUntil = 0;
     s16 lastTorchTimer = 0;
     bool wasCut = false;
@@ -145,10 +148,30 @@ static void MirrorUpdate(Actor* actor, PlayState* play) {
     }
     Actor* realPlayer = play->actorCtx.actorLists[ACTORCAT_PLAYER].head;
     play->actorCtx.actorLists[ACTORCAT_PLAYER].head = &owner->actor;
+    // A released arrow checks this flag on its player to know the shot really happened
+    u8 shotFlag = owner->unk_A73;
+    owner->unk_A73 = 1;
     LocalMagicState magic = SaveLocalMagic();
     it->second.update(actor, play);
     RestoreLocalMagic(magic);
+    owner->unk_A73 = shotFlag;
     play->actorCtx.actorLists[ACTORCAT_PLAYER].head = realPlayer;
+}
+
+static bool CanFlyForReal(s16 id) {
+    return id == ACTOR_EN_ARROW || id == ACTOR_EN_BOOM;
+}
+
+// Turns a visual-only mirror into one that flies and collides by itself, as if the owner had thrown it on our game
+static void MakeMirrorLive(Actor* mirror) {
+    ProjectileNet* net = ObjectExtension::GetInstance().Get<ProjectileNet>(mirror);
+    auto it = sMirrorFuncs.find(mirror);
+    if (net == nullptr || net->live || it == sMirrorFuncs.end()) {
+        return;
+    }
+    net->live = true;
+    it->second.update = mirror->update;
+    mirror->update = MirrorUpdate;
 }
 
 static void MirrorDestroy(Actor* actor, PlayState* play) {
@@ -223,6 +246,13 @@ static bool IsBreakable(s16 id) {
 // keep correcting each other.
 static bool IsAutoMover(s16 id) {
     return id == ACTOR_EN_GOROIWA;
+}
+
+// Background actors that move on their own (platforms, elevators, rotating parts of rooms). Water levels and the Forest
+// Temple elevator stay individual on purpose, they can lock a player in.
+static bool IsSharedPlatform(s16 id) {
+    return id != ACTOR_BG_MIZU_WATER && id != ACTOR_BG_MORI_ELEVATOR && id != ACTOR_OBJ_TIMEBLOCK &&
+           id != ACTOR_OBJ_WARP2BLOCK;
 }
 
 static bool IsMovableObject(s16 id) {
@@ -337,10 +367,14 @@ void Anchor::Interactions_Reset() {
 void Anchor::Interactions_ShouldActorUpdate(Actor* actor, bool* should) {
     if (IsMirrorable(actor->id)) {
         ProjectileNet* net = ObjectExtension::GetInstance().Get<ProjectileNet>(actor);
-        if (net != nullptr && net->isMirror) {
+        if (net != nullptr && net->isMirror && !net->live) {
             *should = false;
         }
-    } else if (IsMovableObject(actor->id)) {
+    } else if (actor->id == ACTOR_EN_HORSE) {
+        if (Interactions_IsHorseMirror(actor)) {
+            *should = false;
+        }
+    } else if (IsMovableObject(actor->id) || actor->category == ACTORCAT_BG) {
         WorldObjectNet* net = ObjectExtension::GetInstance().Get<WorldObjectNet>(actor);
         if (net != nullptr && net->puppetUntil > coop.frameCounter) {
             *should = false;
@@ -377,7 +411,11 @@ void Anchor::Interactions_OnActorKill(Actor* actor) {
 
 // MARK: - Per frame
 
+static void CleanupHorseMirrors();
+
 void Anchor::Coop_UpdateInteractions() {
+    CleanupHorseMirrors();
+
     if (!roomState.syncInteractions) {
         return;
     }
@@ -411,6 +449,7 @@ void Anchor::Coop_UpdateInteractions() {
 
     nlohmann::json projectiles = nlohmann::json::array();
     nlohmann::json objects = nlohmann::json::array();
+    bool isSceneLeader = Coop_IsLowestIdInScene();
 
     for (int category = 0; category < ACTORCAT_MAX; category++) {
         Actor* actor = gPlayState->actorCtx.actorLists[category].head;
@@ -435,7 +474,9 @@ void Anchor::Coop_UpdateInteractions() {
                     }
                     projectiles.push_back({ net->projId, actor->id, actor->params, (s32)actor->world.pos.x,
                                             (s32)actor->world.pos.y, (s32)actor->world.pos.z, actor->shape.rot.x,
-                                            actor->shape.rot.y, exploding ? 1 : 0, element });
+                                            actor->shape.rot.y, exploding ? 1 : 0, element,
+                                            // Released: the arrow has left the bow
+                                            actor->id != ACTOR_EN_ARROW || actor->parent == nullptr ? 1 : 0 });
                 }
             } else if (IsMovableObject(actor->id) && IsInCurrentRoom(actor) &&
                        // Only the bomb itself moves, not the flower, and not while it explodes
@@ -461,6 +502,8 @@ void Anchor::Coop_UpdateInteractions() {
                     entry.push_back((s32)actor->world.pos.z);
                     entry.push_back(actor->shape.rot.y);
                     entry.push_back(actor->room);
+                    entry.push_back(actor->shape.rot.x);
+                    entry.push_back(actor->shape.rot.z);
                     objects.push_back(entry);
                 }
 
@@ -478,6 +521,36 @@ void Anchor::Coop_UpdateInteractions() {
                         Coop_SendToTeammatesInScene(payload);
                     }
                     net->wasCut = isCut;
+                }
+            } else if (actor->category == ACTORCAT_BG && roomState.syncPlatforms && isSceneLeader &&
+                       IsInCurrentRoom(actor) && IsSharedPlatform(actor->id)) {
+                // Moving platforms, elevators, rotating parts of rooms: they follow the teammate with the lowest id
+                WorldObjectNet* net = ObjectExtension::GetInstance().Get<WorldObjectNet>(actor);
+                if (net == nullptr) {
+                    ObjectExtension::GetInstance().Set<WorldObjectNet>(actor, WorldObjectNet{});
+                    net = ObjectExtension::GetInstance().Get<WorldObjectNet>(actor);
+                }
+                bool rotated = net->lastRot.x != actor->shape.rot.x || net->lastRot.y != actor->shape.rot.y ||
+                               net->lastRot.z != actor->shape.rot.z;
+                if (!net->initialized) {
+                    net->initialized = true;
+                    net->lastSent = actor->world.pos;
+                    net->lastRot = actor->shape.rot;
+                } else if (Math_Vec3f_DistXYZ(&actor->world.pos, &net->lastSent) > 0.5f || rotated) {
+                    net->lastSent = actor->world.pos;
+                    net->lastRot = actor->shape.rot;
+                    nlohmann::json entry = { actor->id, actor->params };
+                    for (auto& v : HomeOf(actor)) {
+                        entry.push_back(v);
+                    }
+                    entry.push_back((s32)actor->world.pos.x);
+                    entry.push_back((s32)actor->world.pos.y);
+                    entry.push_back((s32)actor->world.pos.z);
+                    entry.push_back(actor->shape.rot.y);
+                    entry.push_back(actor->room);
+                    entry.push_back(actor->shape.rot.x);
+                    entry.push_back(actor->shape.rot.z);
+                    objects.push_back(entry);
                 }
             } else if (actor->id == ACTOR_EN_G_SWITCH && ((EnGSwitch*)actor)->type == ENGSWITCH_SILVER_RUPEE) {
                 // Silver rupee picked up by us
@@ -574,6 +647,7 @@ void Anchor::HandlePacket_Projectiles(nlohmann::json payload) {
         s16 rotY = entry.at(7).get<s16>();
         bool exploding = entry.at(8).get<int>() != 0;
         s16 element = entry.size() > 9 ? entry.at(9).get<s16>() : 0;
+        bool released = entry.size() > 10 && entry.at(10).get<int>() != 0;
         present.insert(projId);
 
         auto it = mirrors.find(projId);
@@ -594,13 +668,21 @@ void Anchor::HandlePacket_Projectiles(nlohmann::json payload) {
         Actor* mirror = nullptr;
         if (it != mirrors.end()) {
             mirror = it->second;
-            mirror->world.pos = pos;
-            mirror->shape.rot.x = mirror->world.rot.x = rotX;
-            mirror->shape.rot.y = mirror->world.rot.y = rotY;
+            ProjectileNet* net = ObjectExtension::GetInstance().Get<ProjectileNet>(mirror);
+            // A live copy flies by itself, don't pull it around
+            if (net == nullptr || !net->live) {
+                mirror->world.pos = pos;
+                mirror->shape.rot.x = mirror->world.rot.x = rotX;
+                mirror->shape.rot.y = mirror->world.rot.y = rotY;
+            }
         } else {
             sApplyingRemote = true;
             mirror = SpawnMirror(nullptr, actorId, pos, rotX, rotY, params, owner, projId);
             sApplyingRemote = false;
+        }
+
+        if (mirror != nullptr && released && roomState.syncRealProjectiles && CanFlyForReal(actorId)) {
+            MakeMirrorLive(mirror);
         }
 
         // Fire/ice/light arrow effect on the copy of the arrow
@@ -650,6 +732,10 @@ void Anchor::HandlePacket_WorldObjects(nlohmann::json payload) {
 
         actor->world.pos = ReadVec(entry, 5);
         actor->shape.rot.y = actor->world.rot.y = entry.at(8).get<s16>();
+        if (entry.size() > 11) {
+            actor->shape.rot.x = actor->world.rot.x = entry.at(10).get<s16>();
+            actor->shape.rot.z = actor->world.rot.z = entry.at(11).get<s16>();
+        }
 
         WorldObjectNet* net = ObjectExtension::GetInstance().Get<WorldObjectNet>(actor);
         if (net == nullptr) {
@@ -760,4 +846,98 @@ void Anchor::HandlePacket_SilverCollected(nlohmann::json payload) {
         net = ObjectExtension::GetInstance().Get<WorldObjectNet>(actor);
     }
     net->wasCut = true;
+}
+
+// MARK: - Epona
+
+// A copy of a teammate's horse, shown under their figure while they ride. It never runs its own logic (so nobody can
+// mount it); its pose is copied from the teammate's horse every update.
+static std::unordered_map<uint32_t, Actor*> sHorseMirrors;
+static std::unordered_map<uint32_t, uint32_t> sHorseRetryFrame;
+
+bool Anchor::Interactions_IsHorseMirror(Actor* actor) {
+    for (auto& [clientId, horse] : sHorseMirrors) {
+        if (horse == actor) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void HorseMirrorDestroy(Actor* actor, PlayState* play) {
+    for (auto it = sHorseMirrors.begin(); it != sHorseMirrors.end(); ++it) {
+        if (it->second == actor) {
+            sHorseMirrors.erase(it);
+            break;
+        }
+    }
+    MirrorDestroy(actor, play);
+}
+
+// Horses of teammates who left the scene, went offline or got off
+static void CleanupHorseMirrors() {
+    Anchor* anchor = Anchor::Instance;
+    for (auto it = sHorseMirrors.begin(); it != sHorseMirrors.end();) {
+        auto client = anchor->clients.find(it->first);
+        bool keep = client != anchor->clients.end() && client->second.online && client->second.horseActive &&
+                    client->second.sceneNum == gPlayState->sceneNum && anchor->roomState.syncPlayerEffects;
+        if (!keep) {
+            Actor* horse = it->second;
+            it = sHorseMirrors.erase(it);
+            if (horse->update != nullptr) {
+                Actor_Kill(horse);
+            }
+        } else {
+            ++it;
+        }
+    }
+}
+
+void Anchor_DummyHorse(Player* player, AnchorClient& client) {
+    Anchor* anchor = Anchor::Instance;
+    auto it = sHorseMirrors.find(client.clientId);
+    Actor* horse = it != sHorseMirrors.end() ? it->second : nullptr;
+
+    if (!client.horseActive || !anchor->roomState.syncPlayerEffects) {
+        if (horse != nullptr) {
+            Actor_Kill(horse);
+            sHorseMirrors.erase(it);
+        }
+        return;
+    }
+
+    if (horse == nullptr) {
+        // Some places refuse to spawn a horse (or it removes itself), don't keep trying every frame
+        uint32_t now = anchor->coop.frameCounter;
+        if (sHorseRetryFrame.contains(client.clientId) && now < sHorseRetryFrame[client.clientId]) {
+            return;
+        }
+        sHorseRetryFrame[client.clientId] = now + 40;
+
+        horse = SpawnMirror(nullptr, ACTOR_EN_HORSE, client.horsePos, 0, client.horseRotY, client.horseParams,
+                            client.clientId, 0);
+        if (horse == nullptr) {
+            return;
+        }
+        ObjectExtension::GetInstance().Remove<ProjectileNet>(horse);
+        horse->destroy = HorseMirrorDestroy;
+        horse->flags &= ~ACTOR_FLAG_ATTENTION_ENABLED;
+        sHorseMirrors[client.clientId] = horse;
+    }
+
+    if (horse->update == nullptr) {
+        return;
+    }
+
+    horse->world.pos = client.horsePos;
+    horse->shape.rot.y = horse->world.rot.y = client.horseRotY;
+
+    EnHorse* enHorse = (EnHorse*)horse;
+    SkelAnime* skelAnime = &enHorse->skin.skelAnime;
+    size_t joints = MIN((size_t)skelAnime->limbCount, client.horseJoints.size() / 3);
+    for (size_t i = 0; i < joints; i++) {
+        skelAnime->jointTable[i].x = client.horseJoints[i * 3];
+        skelAnime->jointTable[i].y = client.horseJoints[i * 3 + 1];
+        skelAnime->jointTable[i].z = client.horseJoints[i * 3 + 2];
+    }
 }

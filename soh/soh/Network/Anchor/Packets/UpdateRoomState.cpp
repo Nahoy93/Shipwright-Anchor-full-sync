@@ -36,6 +36,10 @@ nlohmann::json Anchor::PrepRoomState() {
         payload["syncMusic"] = 0;
         payload["objectUpdateRate"] = 20;
         payload["timeSyncSeconds"] = 5;
+        payload["syncRealProjectiles"] = 0;
+        payload["syncPlatforms"] = 0;
+        payload["syncGameOver"] = 0;
+        payload["syncTradeTimers"] = 0;
     } else {
         payload["pvpMode"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.PvpMode"), 1);
         payload["showLocationsMode"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.ShowLocationsMode"), 1);
@@ -56,6 +60,10 @@ nlohmann::json Anchor::PrepRoomState() {
         payload["syncMusic"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncMusic"), 1);
         payload["objectUpdateRate"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.ObjectUpdateRate"), 20);
         payload["timeSyncSeconds"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.TimeSyncSeconds"), 5);
+        payload["syncRealProjectiles"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncRealProjectiles"), 1);
+        payload["syncPlatforms"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncPlatforms"), 1);
+        payload["syncGameOver"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncGameOver"), 1);
+        payload["syncTradeTimers"] = CVarGetInteger(CVAR_REMOTE_ANCHOR("RoomSettings.SyncTradeTimers"), 1);
     }
 
     return payload;
@@ -95,4 +103,8 @@ void Anchor::HandlePacket_UpdateRoomState(nlohmann::json payload) {
     roomState.syncMusic = payload["state"].value("syncMusic", (u8)0);
     roomState.objectUpdateRate = payload["state"].value("objectUpdateRate", (u8)20);
     roomState.timeSyncSeconds = payload["state"].value("timeSyncSeconds", (u8)5);
+    roomState.syncRealProjectiles = payload["state"].value("syncRealProjectiles", (u8)0);
+    roomState.syncPlatforms = payload["state"].value("syncPlatforms", (u8)0);
+    roomState.syncGameOver = payload["state"].value("syncGameOver", (u8)0);
+    roomState.syncTradeTimers = payload["state"].value("syncTradeTimers", (u8)0);
 }

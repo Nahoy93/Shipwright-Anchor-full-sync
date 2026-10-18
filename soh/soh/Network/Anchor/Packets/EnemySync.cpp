@@ -58,6 +58,7 @@ struct EnemyTarget {
     u16 freezeTimer = 0;
     u16 colorFilterParams = 0;
     u8 colorFilterTimer = 0;
+    uint32_t parentNetId = 0;
     u8 missing = 0;
     uint32_t lastSnapshot = 0;
 };
@@ -100,6 +101,9 @@ static std::vector<Actor*> GetSyncableEnemies() {
     return result;
 }
 
+// The network id of an enemy's parent, when the parent is an enemy this authority tracks too
+static uint32_t ParentNetId(Actor* actor);
+
 static bool IsHoldingPlayerActor(Actor* actor) {
     return GET_PLAYER(gPlayState)->actor.parent == actor;
 }
@@ -107,6 +111,14 @@ static bool IsHoldingPlayerActor(Actor* actor) {
 static void ClearFollowerState() {
     sTargets.clear();
     sTargetAuthority = 0;
+}
+
+static uint32_t ParentNetId(Actor* actor) {
+    if (actor->parent == nullptr) {
+        return 0;
+    }
+    EnemyNet* net = ObjectExtension::GetInstance().Get<EnemyNet>(actor->parent);
+    return net != nullptr ? net->netId : 0;
 }
 
 void Anchor::EnemySync_Reset() {
@@ -303,7 +315,8 @@ void Anchor::SendPacket_EnemySync() {
         enemies.push_back({ net->netId, actor->id, actor->params, (s32)actor->world.pos.x, (s32)actor->world.pos.y,
                             (s32)actor->world.pos.z, actor->shape.rot.y, actor->colChkInfo.health,
                             actor->category == ACTORCAT_BOSS ? 1 : 0, actor->parent != nullptr ? 1 : 0,
-                            actor->freezeTimer, actor->colorFilterParams, actor->colorFilterTimer });
+                            actor->freezeTimer, actor->colorFilterParams, actor->colorFilterTimer,
+                            ParentNetId(actor) });
     }
 
     nlohmann::json payload;
@@ -347,6 +360,7 @@ void Anchor::HandlePacket_EnemySync(nlohmann::json payload) {
         target.freezeTimer = entry.size() > 10 ? entry.at(10).get<u16>() : 0;
         target.colorFilterParams = entry.size() > 11 ? entry.at(11).get<u16>() : 0;
         target.colorFilterTimer = entry.size() > 12 ? entry.at(12).get<u8>() : 0;
+        target.parentNetId = entry.size() > 13 ? entry.at(13).get<uint32_t>() : 0;
         target.lastSnapshot = sSnapshotSeq;
     }
 
@@ -392,16 +406,29 @@ void Anchor::HandlePacket_EnemySync(nlohmann::json payload) {
             continue;
         }
 
-        // The authority has an enemy we don't, spawn it. Only free standing ones: enemies that belong to a parent
-        // actor (hands of Dead Hand, Gohma's eggs, ...) can't live without it and are left to their parent.
-        if (target.isBoss || target.hasParent || ++target.missing < SNAPSHOTS_BEFORE_SPAWN ||
-            spawns >= MAX_SPAWNS_PER_SNAPSHOT) {
+        // The authority has an enemy we don't, spawn it. Enemies that belong to a parent actor (hands of Dead Hand,
+        // Gohma's eggs, ...) can't live without it: they're spawned as a child of our copy of the parent, and only
+        // when we have that copy.
+        if (target.isBoss || ++target.missing < SNAPSHOTS_BEFORE_SPAWN || spawns >= MAX_SPAWNS_PER_SNAPSHOT) {
             continue;
         }
 
+        Actor* parent = nullptr;
+        if (target.hasParent) {
+            auto parentIt = mapped.find(target.parentNetId);
+            if (target.parentNetId == 0 || parentIt == mapped.end() || parentIt->second->update == nullptr) {
+                continue;
+            }
+            parent = parentIt->second;
+        }
+
         target.missing = 0;
-        Actor* spawned = Actor_Spawn(&gPlayState->actorCtx, gPlayState, target.actorId, target.pos.x, target.pos.y,
-                                     target.pos.z, 0, target.rotY, 0, target.params);
+        Actor* spawned =
+            parent != nullptr
+                ? Actor_SpawnAsChild(&gPlayState->actorCtx, parent, gPlayState, target.actorId, target.pos.x,
+                                     target.pos.y, target.pos.z, 0, target.rotY, 0, target.params)
+                : Actor_Spawn(&gPlayState->actorCtx, gPlayState, target.actorId, target.pos.x, target.pos.y,
+                              target.pos.z, 0, target.rotY, 0, target.params);
         if (spawned != nullptr) {
             spawns++;
             ObjectExtension::GetInstance().Set<EnemyNet>(spawned,

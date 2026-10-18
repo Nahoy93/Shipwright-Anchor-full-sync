@@ -28,6 +28,8 @@ extern PlayState* gPlayState;
 // MARK: - Teammate figure
 
 void Anchor_DummyPlayerEffects(Player* player, AnchorClient& client) {
+    Anchor_DummyHorse(player, client);
+
     if (!Anchor::Instance->roomState.syncPlayerEffects) {
         player->currentMask = PLAYER_MASK_NONE;
         return;

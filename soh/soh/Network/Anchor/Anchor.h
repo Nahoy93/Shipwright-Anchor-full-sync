@@ -64,6 +64,12 @@ typedef struct {
     bool isBurning;
     bool isShocked;
     bool lensActive;
+    // Epona under a riding teammate (PLAYER_UPDATE)
+    bool horseActive;
+    s16 horseParams;
+    Vec3f horsePos;
+    s16 horseRotY;
+    std::vector<s16> horseJoints;
 
     // Ptr to the dummy player
     Player* player;
@@ -91,6 +97,10 @@ typedef struct {
     u8 syncMusic;         // 0 = off, 1 = the music in an area follows the teammate with the lowest id there
     u8 objectUpdateRate;  // Projectile, object and drop updates sent per second (1-20)
     u8 timeSyncSeconds;   // How often the time of day is sent, in seconds (1-30)
+    u8 syncRealProjectiles; // 0 = off, 1 = teammates' arrows and boomerangs fly and hit for real in your game
+    u8 syncPlatforms;       // 0 = off, 1 = moving platforms and elevators follow the room leader
+    u8 syncGameOver;        // 0 = off, 1 = the first answer in the game over menu counts for the whole team
+    u8 syncTradeTimers;     // 0 = off, 1 = trade quest timers (Odd Mushroom, Frog, Eye Drops) are shared
 } RoomState;
 
 class Anchor : public Network {
@@ -205,6 +215,12 @@ class Anchor : public Network {
     void HandlePacket_DropSpawn(nlohmann::json payload);
     void HandlePacket_DropMove(nlohmann::json payload);
     void HandlePacket_DropGone(nlohmann::json payload);
+    // Batch 3
+    void Coop_ApplyPendingRoomKills();
+    void Coop_UpdateGameOver();
+    void Coop_UpdateTradeTimer();
+    void HandlePacket_GameOverChoice(nlohmann::json payload);
+    void HandlePacket_TradeTimer(nlohmann::json payload);
 
   public:
     uint32_t ownClientId;
@@ -256,6 +272,8 @@ class Anchor : public Network {
     inline static const std::string PLAYER_REVIVED = "PLAYER_REVIVED";
     inline static const std::string RUPEE_INCOME = "RUPEE_INCOME";
     inline static const std::string WARP_SPAWNED = "WARP_SPAWNED";
+    inline static const std::string GAME_OVER_CHOICE = "GAME_OVER_CHOICE";
+    inline static const std::string TRADE_TIMER = "TRADE_TIMER";
 
     // Co-op runtime state (game thread only)
     struct CoopState {
@@ -306,6 +324,7 @@ class Anchor : public Network {
     bool IsSaveLoaded();
     bool CanTeleportTo(uint32_t clientId);
     uint32_t GetDummyPlayerClientId(const Actor* actor);
+    bool Interactions_IsHorseMirror(Actor* actor);
 
     void SendPacket_ClearTeamState(std::string teamId);
     void SendPacket_DamagePlayer(u32 clientId, u8 damageEffect, u8 damage);
@@ -345,6 +364,8 @@ typedef enum {
 
 // Draws effects on a teammate's figure (burning, shock, burning stick), see PlayerEffects.cpp
 void Anchor_DummyPlayerEffects(Player* player, AnchorClient& client);
+// Shows a teammate's horse under their figure while they ride, see Interactions.cpp
+void Anchor_DummyHorse(Player* player, AnchorClient& client);
 // Spawns a visual effect that runs and draws around a teammate's figure (ocarina song waves), see Interactions.cpp
 Actor* Anchor_SpawnEffectMirror(s16 actorId, Vec3f pos, s16 params, uint32_t owner);
 

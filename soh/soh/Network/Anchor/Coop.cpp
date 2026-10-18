@@ -135,6 +135,9 @@ void Anchor::Coop_OnGameFrame() {
     Coop_UpdateDrops();
     Coop_UpdateFaroresWind();
     Coop_UpdateMusic();
+    Coop_ApplyPendingRoomKills();
+    Coop_UpdateGameOver();
+    Coop_UpdateTradeTimer();
 }
 
 void Anchor::Coop_OnPlayerUpdate() {
