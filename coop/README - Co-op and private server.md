@@ -100,7 +100,7 @@ The server accepts both encrypted and unencrypted connections on the same port. 
 - The first time you connect, the game saves the server's certificate. If the certificate changes later, the game refuses to connect and says so. That protects against someone pretending to be your server.
 - To be sure from the very first connection, paste the fingerprint from the server window into **Server Fingerprint (optional)**.
 - If the server really was set up again (new `tls\` folder), press **Forget Saved Certificates** and connect again.
-- To only allow encrypted connections, add `set ANCHOR_REQUIRE_TLS=1` to `Start server.bat`. `set ANCHOR_TLS=0` turns encryption off completely.
+- To only allow encrypted connections, remove `rem` in front of `set ANCHOR_REQUIRE_TLS=1` in `Start server.bat`. `set ANCHOR_TLS=0` turns encryption off completely.
 
 ## 3. Connect in the game
 
