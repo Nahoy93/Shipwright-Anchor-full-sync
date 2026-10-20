@@ -1,5 +1,6 @@
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <set>
 #include <string>
@@ -39,6 +40,11 @@ extern PlayState* gPlayState;
  * Bosses only share their health, moving them around would break their scripted phases.
  *
  * Deaths still go through ENEMY_DEFEATED, which uses the network id when there is one.
+ *
+ * Prediction: a snapshot is already a little old when it arrives (the way from the authority through the server, and
+ * the wait for the next game update). Followers measure each enemy's speed from the last two snapshots (using the
+ * authority's frame numbers in "frame") and pull their enemy towards where it should be by now, at most 6 game updates
+ * ahead and at most 30 units per update. A jump larger than the snap distance (a teleport) is never extrapolated.
  */
 
 struct EnemyNet {
@@ -65,6 +71,11 @@ struct EnemyTarget {
     uint32_t parentNetId = 0;
     u8 missing = 0;
     uint32_t lastSnapshot = 0;
+    // Prediction
+    bool seen = false;
+    Vec3f velocity = { 0.0f, 0.0f, 0.0f }; // units per game update, from the last two snapshots
+    uint32_t senderFrame = 0;              // the authority's frame of the newest snapshot, 0 = unknown
+    uint32_t receivedFrame = 0;            // our frame when it arrived
 };
 
 static std::unordered_map<uint32_t, EnemyTarget> sTargets;
@@ -75,12 +86,21 @@ static uint32_t sNextNetId = 1;
 static uint32_t sSendTimer = 0;
 static uint32_t sCurrentAuthority = 0;
 static bool sIsFollower = false;
+// The authority's frame of the newest snapshot, to drop older ones that arrive late
+static uint32_t sLastSenderFrame = 0;
+// How many game updates old a snapshot is when it arrives, negative = prediction off
+static float sPredictFrames = -1.0f;
 
 static constexpr float MATCH_DISTANCE_MAX = 100000.0f;
 static constexpr float SNAP_DISTANCE = 250.0f;
 static constexpr float FOLLOW_FACTOR = 0.3f;
 static constexpr int MAX_SPAWNS_PER_SNAPSHOT = 3;
 static constexpr u8 SNAPSHOTS_BEFORE_SPAWN = 5;
+static constexpr float MAX_PREDICT_FRAMES = 6.0f;
+static constexpr float MAX_PREDICT_SPEED = 30.0f;
+// A snapshot up to this many frames older than the newest one arrived late. An even older frame number means the
+// authority loaded the scene again (its frames count from 0 again).
+static constexpr uint32_t STALE_SNAPSHOT_FRAMES = 20;
 
 static bool IsSyncedBossActor(Actor* actor) {
     return actor->id != ACTOR_BOSS_GANON && actor->id != ACTOR_BOSS_GANON2;
@@ -115,6 +135,37 @@ static bool IsHoldingPlayerActor(Actor* actor) {
 static void ClearFollowerState() {
     sTargets.clear();
     sTargetAuthority = 0;
+    sLastSenderFrame = 0;
+}
+
+// Speed from the last two snapshots, in units per game update, to predict where the enemy is by now
+static void UpdateVelocity(EnemyTarget& target, const Vec3f& pos, uint32_t senderFrame, uint32_t now) {
+    float frames = 0.0f;
+    if (target.seen) {
+        if (senderFrame != 0 && target.senderFrame != 0) {
+            // The authority's own frame numbers: exact even when packets arrive unevenly
+            if (senderFrame > target.senderFrame) {
+                frames = (float)(senderFrame - target.senderFrame);
+            }
+        } else if (now > target.receivedFrame) {
+            frames = (float)(now - target.receivedFrame);
+        }
+    }
+
+    Vec3f delta = { pos.x - target.pos.x, pos.y - target.pos.y, pos.z - target.pos.z };
+    float dist = sqrtf(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z);
+    if (frames <= 0.0f || dist > SNAP_DISTANCE) {
+        // First snapshot or a teleport: no prediction until the next one
+        target.velocity = { 0.0f, 0.0f, 0.0f };
+    } else {
+        float speed = dist / frames;
+        float scale = speed > MAX_PREDICT_SPEED ? MAX_PREDICT_SPEED / speed : 1.0f;
+        target.velocity = { delta.x / frames * scale, delta.y / frames * scale, delta.z / frames * scale };
+    }
+
+    target.senderFrame = senderFrame;
+    target.receivedFrame = now;
+    target.seen = true;
 }
 
 static uint32_t ParentNetId(Actor* actor) {
@@ -219,6 +270,10 @@ void Anchor::Coop_UpdateEnemySync() {
         sTargetAuthority = authority;
     }
 
+    sPredictFrames = CVarGetInteger(CVAR_REMOTE_ANCHOR("Coop.PredictEnemies"), 1)
+                         ? (float)EstimatedPacketAgeMs(authority) / 50.0f
+                         : -1.0f;
+
     // Enemies that didn't update this frame (too far away, outside the culling area) still follow the authority
     for (Actor* actor : GetSyncableEnemies()) {
         EnemyNet* net = ObjectExtension::GetInstance().Get<EnemyNet>(actor);
@@ -237,13 +292,23 @@ static void FollowTarget(Actor* actor, EnemyTarget& target) {
         return;
     }
 
-    float dist = Math_Vec3f_DistXYZ(&actor->world.pos, &target.pos);
+    // Where the enemy should be by now: the snapshot's position moved on by its speed
+    Vec3f goal = target.pos;
+    if (sPredictFrames >= 0.0f) {
+        float ahead = sPredictFrames + (float)(gPlayState->gameplayFrames - target.receivedFrame);
+        ahead = CLAMP(ahead, 0.0f, MAX_PREDICT_FRAMES);
+        goal.x += target.velocity.x * ahead;
+        goal.y += target.velocity.y * ahead;
+        goal.z += target.velocity.z * ahead;
+    }
+
+    float dist = Math_Vec3f_DistXYZ(&actor->world.pos, &goal);
     if (dist > SNAP_DISTANCE) {
-        actor->world.pos = target.pos;
+        actor->world.pos = goal;
     } else {
-        actor->world.pos.x += (target.pos.x - actor->world.pos.x) * FOLLOW_FACTOR;
-        actor->world.pos.y += (target.pos.y - actor->world.pos.y) * FOLLOW_FACTOR;
-        actor->world.pos.z += (target.pos.z - actor->world.pos.z) * FOLLOW_FACTOR;
+        actor->world.pos.x += (goal.x - actor->world.pos.x) * FOLLOW_FACTOR;
+        actor->world.pos.y += (goal.y - actor->world.pos.y) * FOLLOW_FACTOR;
+        actor->world.pos.z += (goal.z - actor->world.pos.z) * FOLLOW_FACTOR;
     }
     Math_SmoothStepToS(&actor->world.rot.y, target.rotY, 2, 0x2000, 0);
     actor->shape.rot.y = actor->world.rot.y;
@@ -277,6 +342,8 @@ void Anchor::EnemySync_OnActorUpdate(Actor* actor) {
         payload["targetClientId"] = sCurrentAuthority;
         payload["netId"] = net->netId;
         payload["health"] = health;
+        // The damage itself, so hits from several players at once all count
+        payload["damage"] = hurt ? net->lastHealth - health : 0;
         payload["freezeTimer"] = actor->freezeTimer;
         payload["colorFilterParams"] = actor->colorFilterParams;
         payload["colorFilterTimer"] = actor->colorFilterTimer;
@@ -328,6 +395,8 @@ void Anchor::SendPacket_EnemySync() {
     payload["targetTeamId"] = CVarGetString(CVAR_REMOTE_ANCHOR("TeamId"), "default");
     payload["sceneNum"] = gPlayState->sceneNum;
     payload["roomNum"] = gPlayState->roomCtx.curRoom.num;
+    // For the followers' prediction (and to spot snapshots that arrive out of order)
+    payload["frame"] = gPlayState->gameplayFrames;
     payload["enemies"] = enemies;
     payload["quiet"] = true;
 
@@ -350,13 +419,26 @@ void Anchor::HandlePacket_EnemySync(nlohmann::json payload) {
         sTargetAuthority = sender;
     }
 
+    // A snapshot older than one we already used (it took a slower way here, TCP instead of UDP): skip it
+    uint32_t senderFrame = payload.value("frame", (uint32_t)0);
+    if (senderFrame != 0 && sLastSenderFrame != 0 && senderFrame <= sLastSenderFrame &&
+        sLastSenderFrame - senderFrame <= STALE_SNAPSHOT_FRAMES) {
+        return;
+    }
+    if (senderFrame != 0) {
+        sLastSenderFrame = senderFrame;
+    }
+    uint32_t now = gPlayState->gameplayFrames;
+
     sSnapshotSeq++;
     for (auto& entry : payload.at("enemies")) {
         uint32_t netId = entry.at(0).get<uint32_t>();
         EnemyTarget& target = sTargets[netId];
         target.actorId = entry.at(1).get<s16>();
         target.params = entry.at(2).get<s16>();
-        target.pos = { (f32)entry.at(3).get<s32>(), (f32)entry.at(4).get<s32>(), (f32)entry.at(5).get<s32>() };
+        Vec3f pos = { (f32)entry.at(3).get<s32>(), (f32)entry.at(4).get<s32>(), (f32)entry.at(5).get<s32>() };
+        UpdateVelocity(target, pos, senderFrame, now);
+        target.pos = pos;
         target.rotY = entry.at(6).get<s16>();
         target.health = entry.at(7).get<u8>();
         target.isBoss = entry.at(8).get<int>() != 0;
@@ -476,7 +558,13 @@ void Anchor::HandlePacket_EnemyHit(nlohmann::json payload) {
         actor->colorFilterTimer = colorFilterTimer;
     }
 
+    // Subtract the damage the follower did. Two followers hitting at the same time each report their own hit; with
+    // only the health they saw, one of the hits would be lost. Never down to 0 here, deaths go through ENEMY_DEFEATED.
     u8 health = payload.at("health").get<u8>();
+    s32 damage = payload.value("damage", -1);
+    if (damage > 0) {
+        health = (u8)MAX(1, (s32)actor->colChkInfo.health - damage);
+    }
     if (health > 0 && health < actor->colChkInfo.health) {
         actor->colChkInfo.health = health;
         // Flash red like a normal hit

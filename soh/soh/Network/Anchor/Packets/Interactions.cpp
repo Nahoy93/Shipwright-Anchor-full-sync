@@ -49,7 +49,8 @@ struct ProjectileNet {
     uint32_t projId = 0;
     uint32_t owner = 0;
     bool isMirror = false;
-    bool live = false; // A mirror that flies and hits things itself (arrows, seeds, nuts, boomerang)
+    bool live = false;          // A mirror that flies and hits things itself (arrows, seeds, nuts, boomerang)
+    uint32_t lastSeenFrame = 0; // Mirrors: when the owner's list last had it
 };
 static ObjectExtension::Register<ProjectileNet> ProjectileNetRegister;
 
@@ -211,7 +212,8 @@ static Actor* SpawnMirror(Actor* parent, s16 actorId, Vec3f pos, s16 rotX, s16 r
 
     // Some magic sets its position to the (local) player when created
     mirror->world.pos = pos;
-    ObjectExtension::GetInstance().Set<ProjectileNet>(mirror, ProjectileNet{ projId, owner, true });
+    ObjectExtension::GetInstance().Set<ProjectileNet>(
+        mirror, ProjectileNet{ projId, owner, true, false, gPlayState->gameplayFrames });
 
     bool drawsAroundPlayer = actorId == ACTOR_ARMS_HOOK || actorId == ACTOR_MAGIC_DARK || actorId == ACTOR_EN_M_THUNDER;
     sMirrorFuncs[mirror] = MirrorFuncs{ mirror->draw, mirror->destroy, owner };
@@ -357,12 +359,13 @@ bool Anchor::Coop_AnyTeammateInScene() {
 }
 
 void Anchor::Coop_SendToTeammatesInScene(nlohmann::json& payload) {
+    std::vector<uint32_t> targets;
     for (auto& [clientId, client] : clients) {
         if (Coop_IsTeammate(client) && client.sceneNum == gPlayState->sceneNum) {
-            payload["targetClientId"] = clientId;
-            SendJsonToRemote(payload);
+            targets.push_back(clientId);
         }
     }
+    SendToClients(payload, targets);
 }
 
 void Anchor::Interactions_Reset() {
@@ -448,7 +451,9 @@ void Anchor::Coop_UpdateInteractions() {
         return;
     }
 
-    // Mirrors of players that left the scene (or the room) go away
+    // Mirrors of players that left the scene (or the room) go away. So do mirrors the owner's updates stopped
+    // listing: the update that said they're gone may have been lost (UDP).
+    uint32_t mirrorTimeout = std::max<uint32_t>(20, 4 * RateToInterval(roomState.objectUpdateRate));
     for (int category = 0; category < ACTORCAT_MAX; category++) {
         Actor* actor = gPlayState->actorCtx.actorLists[category].head;
         while (actor != nullptr) {
@@ -457,7 +462,8 @@ void Anchor::Coop_UpdateInteractions() {
                 if (net != nullptr && net->isMirror &&
                     (!clients.contains(net->owner) || clients[net->owner].sceneNum != gPlayState->sceneNum ||
                      !clients[net->owner].online ||
-                     (IsArrowElement(actor->id) && (actor->parent == nullptr || actor->parent->update == nullptr)))) {
+                     (IsArrowElement(actor->id) && (actor->parent == nullptr || actor->parent->update == nullptr)) ||
+                     (IsProjectile(actor->id) && gPlayState->gameplayFrames - net->lastSeenFrame > mirrorTimeout))) {
                     Actor_Kill(actor);
                 }
             }
@@ -698,6 +704,9 @@ void Anchor::HandlePacket_Projectiles(nlohmann::json payload) {
         if (it != mirrors.end()) {
             mirror = it->second;
             ProjectileNet* net = ObjectExtension::GetInstance().Get<ProjectileNet>(mirror);
+            if (net != nullptr) {
+                net->lastSeenFrame = gPlayState->gameplayFrames;
+            }
             // A live copy flies by itself, don't pull it around
             if (net == nullptr || !net->live) {
                 mirror->world.pos = pos;

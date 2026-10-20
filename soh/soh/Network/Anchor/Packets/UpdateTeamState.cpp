@@ -308,7 +308,7 @@ void Anchor::HandlePacket_UpdateTeamState(nlohmann::json payload) {
         std::lock_guard<std::mutex> lock(incomingPacketQueueMutex);
         for (auto& item : payload["queue"]) {
             nlohmann::json itemPayload = nlohmann::json::parse(item.get<std::string>());
-            incomingPacketQueue.push(itemPayload);
+            incomingPacketQueue.push_back({ itemPayload, std::chrono::steady_clock::now() });
         }
     }
     isHandlingUpdateTeamState = false;

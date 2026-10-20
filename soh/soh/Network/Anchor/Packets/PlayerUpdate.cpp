@@ -1,6 +1,7 @@
 #include "soh/Network/Anchor/Anchor.h"
 #include "soh/Network/Anchor/JsonConversions.hpp"
 #include <nlohmann/json.hpp>
+#include <vector>
 
 extern "C" {
 #include "macros.h"
@@ -98,12 +99,14 @@ void Anchor::SendPacket_PlayerUpdate() {
     }
     payload["quiet"] = true;
 
+    // One packet for everyone in the scene, the server makes the copies (or one packet each on older servers)
+    std::vector<uint32_t> targets;
     for (auto& [clientId, client] : clients) {
         if (client.sceneNum == gPlayState->sceneNum && client.online && client.isSaveLoaded && !client.self) {
-            payload["targetClientId"] = clientId;
-            SendJsonToRemote(payload);
+            targets.push_back(clientId);
         }
     }
+    SendToClients(payload, targets);
 }
 
 void Anchor::HandlePacket_PlayerUpdate(nlohmann::json payload) {

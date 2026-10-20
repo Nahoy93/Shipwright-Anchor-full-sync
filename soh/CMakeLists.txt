@@ -313,6 +313,47 @@ if (ESPEAK)
 endif()
 
 ################################################################################
+# mbedTLS: encrypted Anchor (multiplayer) connections, TLS and the UDP channel
+################################################################################
+if (CMAKE_SYSTEM_NAME MATCHES "Windows|Linux|Darwin")
+    # Keep mbedTLS's own install rules (headers, static libraries) out of the game packages
+    set(MBEDTLS_FETCH_OPTIONS "")
+    if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.28)
+        set(MBEDTLS_FETCH_OPTIONS EXCLUDE_FROM_ALL)
+    endif()
+    # The release tarball includes the generated sources, so no Python/Perl is needed and GEN_FILES stays off
+    FetchContent_Declare(
+        mbedtls
+        URL https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.7/mbedtls-3.6.7.tar.bz2
+        URL_HASH SHA256=a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+        ${MBEDTLS_FETCH_OPTIONS}
+    )
+    set(INSTALL_MBEDTLS_HEADERS OFF CACHE BOOL "Install Mbed TLS headers." FORCE)
+    set(ENABLE_PROGRAMS OFF CACHE BOOL "Build Mbed TLS programs." FORCE)
+    set(ENABLE_TESTING OFF CACHE BOOL "Build Mbed TLS tests." FORCE)
+    set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "Compiler warnings treated as errors" FORCE)
+    set(USE_STATIC_MBEDTLS_LIBRARY ON CACHE BOOL "Build Mbed TLS static library." FORCE)
+    set(USE_SHARED_MBEDTLS_LIBRARY OFF CACHE BOOL "Build Mbed TLS shared library." FORCE)
+    set(GEN_FILES OFF CACHE BOOL "Generate the auto-generated files as needed" FORCE)
+    # Same static runtime as soh and libultraship (mbedTLS's own cmake_minimum_required predates CMP0091)
+    set(CMAKE_POLICY_DEFAULT_CMP0091 NEW)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    FetchContent_MakeAvailable(mbedtls)
+    unset(CMAKE_MSVC_RUNTIME_LIBRARY)
+    unset(CMAKE_POLICY_DEFAULT_CMP0091)
+
+    foreach(MBEDTLS_LIB mbedcrypto mbedx509 mbedtls)
+        set_target_properties(${MBEDTLS_LIB} PROPERTIES FOLDER "mbedtls")
+        # soh clears the default MSVC flags, so ask for optimisation here
+        target_compile_options(${MBEDTLS_LIB} PRIVATE $<$<AND:$<C_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/O2>)
+    endforeach()
+
+    target_compile_definitions(${PROJECT_NAME} PRIVATE ENABLE_ANCHOR_TLS)
+    target_link_libraries(${PROJECT_NAME} PRIVATE mbedtls mbedx509 mbedcrypto)
+endif()
+
+################################################################################
 # Compile definitions
 ################################################################################
 
