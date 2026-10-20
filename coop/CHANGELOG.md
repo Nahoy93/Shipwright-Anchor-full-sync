@@ -11,7 +11,9 @@ game, but without encryption, UDP, ping and the server-side copies.
   encrypted and unencrypted connections on the same port and creates a self-signed certificate in `tls\` on its first
   start, printing its fingerprint. The game remembers the certificate on the first connection (like SSH) and refuses
   the server if it changes, or checks it against *Server Fingerprint (optional)* when one is filled in.
-  *Forget Saved Certificates* clears what the game remembered. Server options: `ANCHOR_REQUIRE_TLS=1` (only
+  The fingerprint can be pasted with or without colons, or as the whole line from the server window; one that can't be
+  read stops the connection instead of trusting any certificate. *Forget Saved Certificates* clears what the game
+  remembered. Server options: `ANCHOR_REQUIRE_TLS=1` (only
   encrypted connections) and `ANCHOR_TLS=0` (no encryption).
 - **UDP for movement.** Player positions, enemy snapshots, projectiles, loose items' positions and sounds go over UDP
   when it works, so a lost packet no longer holds everything else up. The UDP port is the same number as the TCP port.
@@ -27,7 +29,8 @@ game, but without encryption, UDP, ping and the server-side copies.
   and enemies move, instead of at the end: up to 50 ms less delay for everything.
 - **Ping and reconnect.** The game pings the server every 5 seconds. A connection that has been silent for
   15 seconds is made again by itself (switching Wi-Fi, a router that dropped the connection). Failed connection
-  attempts wait 1, 2, 4 and then 5 seconds before the next one.
+  attempts wait 1, 2, 4 and then 5 seconds before the next one, also when the server closes the connection right
+  away.
 - **Enemy prediction.** Followers measure each enemy's speed from the last two snapshots and move it on to where it
   should be by now (at most 6 game updates ahead). Option: *Predict Enemy Movement*.
 
