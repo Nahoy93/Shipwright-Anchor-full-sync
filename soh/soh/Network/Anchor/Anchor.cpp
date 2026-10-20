@@ -47,7 +47,8 @@ void Anchor::Enable() {
         std::lock_guard<std::mutex> lock(tlsMutex);
         tlsHostKey = host + ":" + std::to_string(port);
         std::string pinned = CVarGetString(CVAR_REMOTE_ANCHOR("TlsFingerprint"), "");
-        tlsExpectedIsPinned = !pinned.empty();
+        // Only spaces counts as empty
+        tlsExpectedIsPinned = pinned.find_first_not_of(" \t\r\n") != std::string::npos;
         tlsExpectedFingerprint = tlsExpectedIsPinned ? pinned : KnownTlsFingerprint(tlsHostKey);
         tlsLearnedFingerprint.clear();
         tlsError.clear();

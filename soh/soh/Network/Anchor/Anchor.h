@@ -24,7 +24,8 @@ void DummyPlayer_Update(Actor* actor, PlayState* play);
 void DummyPlayer_Draw(Actor* actor, PlayState* play);
 void DummyPlayer_Destroy(Actor* actor, PlayState* play);
 
-typedef struct {
+// Named: MSVC refuses default member initializers in an unnamed struct that gets its name from a typedef (C7626)
+typedef struct AnchorClient {
     uint32_t clientId;
     std::string name;
     Color_RGB8 color;
@@ -490,6 +491,8 @@ class Anchor : public Network {
 // Packets where only the newest one matters (positions, snapshots, sounds): they may go over UDP, and a lost one is
 // replaced by the next
 bool Anchor_IsRealtimePacket(const std::string& packetType);
+// The SHA-256 fingerprint ("AB:CD:..." with 32 pairs) found in a text, empty when there is none, see Transport.cpp
+std::string Anchor_ParseFingerprint(const std::string& text);
 
 typedef enum {
     // Starting at 5 to continue from the last value in the PlayerDamageResponseType enum

@@ -14,7 +14,7 @@
  *        0     2  magic "AU"
  *        2     1  version (1)
  *        3     1  flags (bit 0: the payload is encrypted)
- *        4     4  token, little endian: the client's id for the server (0 from the server)
+ *        4     4  token, little endian: identifies the client's connection (the server uses the same one)
  *        8     8  sequence number, little endian, counting up per direction
  *       16     n  payload: a JSON packet, or when encrypted the AES-128-GCM ciphertext followed by its 16 byte tag
  *

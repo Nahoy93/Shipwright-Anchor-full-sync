@@ -292,28 +292,70 @@ bool Anchor::SimulateIncomingPacket(const std::string& packetType, Clock::time_p
     return true;
 }
 
-static std::string NormalizeFingerprint(const std::string& text) {
-    std::string hex;
-    for (char c : text) {
-        if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F')) {
-            hex.push_back(c);
-        } else if (c >= 'a' && c <= 'f') {
-            hex.push_back((char)(c - 'a' + 'A'));
-        }
+static bool IsHexDigit(char c) {
+    return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f');
+}
+
+static bool IsFingerprintSeparator(char c) {
+    return c == ':' || c == '-' || c == ' ';
+}
+
+// The SHA-256 fingerprint in "AB:CD:..." form (32 pairs), or empty when the text isn't one. Accepts the pairs with
+// ':', '-' or a space between them or nothing at all, in any case, and also the whole line copied from the server
+// window ("... TLS certificate fingerprint: AB:CD:...").
+std::string Anchor_ParseFingerprint(const std::string& text) {
+    std::string rest = text;
+    std::string lower;
+    for (char c : rest) {
+        lower.push_back(c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c);
     }
+    size_t label = lower.rfind("fingerprint:");
+    if (label != std::string::npos) {
+        rest = rest.substr(label + 12);
+    }
+
+    size_t first = rest.find_first_not_of(" \t\r\n");
+    size_t last = rest.find_last_not_of(" \t\r\n");
+    if (first == std::string::npos) {
+        return "";
+    }
+    rest = rest.substr(first, last - first + 1);
+
     std::string fingerprint;
-    for (size_t i = 0; i + 1 < hex.size(); i += 2) {
-        if (!fingerprint.empty()) {
+    size_t i = 0;
+    for (int pair = 0; pair < 32; pair++) {
+        if (pair > 0) {
+            if (i < rest.size() && IsFingerprintSeparator(rest[i])) {
+                i++;
+            }
             fingerprint.push_back(':');
         }
-        fingerprint.append(hex, i, 2);
+        if (i + 1 >= rest.size() || !IsHexDigit(rest[i]) || !IsHexDigit(rest[i + 1])) {
+            return "";
+        }
+        for (size_t j = i; j < i + 2; j++) {
+            char c = rest[j];
+            fingerprint.push_back(c >= 'a' && c <= 'f' ? (char)(c - 'a' + 'A') : c);
+        }
+        i += 2;
     }
-    return fingerprint;
+
+    // Nothing may follow: a longer run of digits isn't a SHA-256 fingerprint
+    return i == rest.size() ? fingerprint : "";
 }
 
 bool Anchor::OnTlsCertificate(const std::string& fingerprint) {
     std::lock_guard<std::mutex> lock(tlsMutex);
-    std::string expected = NormalizeFingerprint(tlsExpectedFingerprint);
+    std::string expected = Anchor_ParseFingerprint(tlsExpectedFingerprint);
+
+    // A pinned fingerprint that can't be read must not turn into "trust anything"
+    if (expected.empty() && tlsExpectedIsPinned) {
+        SPDLOG_ERROR("[Anchor] The pinned fingerprint \"{}\" isn't a SHA-256 fingerprint", tlsExpectedFingerprint);
+        tlsError = "The server fingerprint in the settings isn't valid: it should be 32 pairs like AB:CD:..., as the "
+                   "server window shows it";
+        isEnabled = false;
+        return false;
+    }
 
     if (expected.empty()) {
         // First connection to this server: trust it and remember the certificate (like SSH does)

@@ -474,14 +474,26 @@ void Network::CloseConnection() {
 }
 
 void Network::ReceiveFromServer() {
+    // Attempts in a row that failed, or that the server closed right away
     int failedAttempts = 0;
 
     while (isEnabled) {
         while (!isConnected && isEnabled) {
+            // Wait a little longer after every failed attempt (1, 2, 4, then every 5 seconds), so a server that's down
+            // isn't flooded and this thread doesn't spin
+            if (failedAttempts > 0) {
+                int waitMs = std::min(5000, 1000 << std::min(failedAttempts - 1, 3));
+                for (int waited = 0; waited < waitMs && isEnabled; waited += 50) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                }
+                if (!isEnabled) {
+                    break;
+                }
+            }
+
             SPDLOG_TRACE("[Network] Attempting to make connection to server...");
 
             if (OpenConnection()) {
-                failedAttempts = 0;
                 isConnected = true;
                 receivedData.clear();
                 lastReceiveTime = std::chrono::steady_clock::now();
@@ -491,18 +503,14 @@ void Network::ReceiveFromServer() {
                 break;
             }
 
-            // Wait a little longer after every failed attempt (1, 2, 4, then every 5 seconds), so a server that's down
-            // isn't flooded and this thread doesn't spin
             failedAttempts++;
-            int waitMs = std::min(5000, 1000 << std::min(failedAttempts - 1, 3));
-            for (int waited = 0; waited < waitMs && isEnabled; waited += 50) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
-            }
         }
 
         if (!isConnected) {
             continue;
         }
+
+        auto connectedAt = std::chrono::steady_clock::now();
 
         socketSet = SDLNet_AllocSocketSet(2);
         if (socketSet && networkSocket) {
@@ -592,6 +600,14 @@ void Network::ReceiveFromServer() {
             receivedData.clear();
             OnDisconnected();
             SPDLOG_INFO("[Network] Ending receiving thread...");
+        }
+
+        // A connection that worked for a while is made again right away. One that ended within seconds counts as a
+        // failed attempt, so a server that accepts and then closes (a proxy whose server is down) isn't hammered.
+        if (std::chrono::steady_clock::now() - connectedAt >= std::chrono::seconds(5)) {
+            failedAttempts = 0;
+        } else {
+            failedAttempts++;
         }
     }
 }
