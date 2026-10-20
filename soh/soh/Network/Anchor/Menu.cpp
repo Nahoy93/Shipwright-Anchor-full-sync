@@ -83,6 +83,47 @@ void AnchorMainMenu(WidgetInfo& info) {
     }
     ImGui::Spacing();
 
+    UIWidgets::CVarCheckbox(
+        "Encrypted Connection (TLS)", CVAR_REMOTE_ANCHOR("UseTls"),
+        UIWidgets::CheckboxOptions()
+            .Color(THEME_COLOR)
+            .Tooltip(
+                "Encrypts everything between you and the server, the password too. The server must have TLS turned on "
+                "(the co-op server has it by default). The first connection saves the server's certificate, and if it "
+                "ever changes, the connection is refused."));
+    if (CVarGetInteger(CVAR_REMOTE_ANCHOR("UseTls"), 0)) {
+        std::string fingerprint = CVarGetString(CVAR_REMOTE_ANCHOR("TlsFingerprint"), "");
+        ImGui::Text("Server Fingerprint (optional)");
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+        if (UIWidgets::InputString(
+                "##TlsFingerprint", &fingerprint,
+                UIWidgets::InputOptions()
+                    .Color(THEME_COLOR)
+                    .Tooltip("The fingerprint the server prints when it starts (AB:CD:...). With it, "
+                             "only that exact server is accepted, even on the first connection."))) {
+            CVarSetString(CVAR_REMOTE_ANCHOR("TlsFingerprint"), fingerprint.c_str());
+            Ship::Context::GetRawInstance()->GetWindow()->GetGui()->SaveConsoleVariablesNextFrame();
+        }
+        if (UIWidgets::Button("Forget Saved Certificates",
+                              UIWidgets::ButtonOptions()
+                                  .Size(ImVec2(ImGui::GetContentRegionAvail().x, 0))
+                                  .Color(UIWidgets::Colors::Gray)
+                                  .Tooltip("Use this when a server you trust was set up again and got a new "
+                                           "certificate."))) {
+            Anchor::ForgetTlsCertificates();
+        }
+    }
+    UIWidgets::CVarCheckbox(
+        "Use UDP For Movement", CVAR_REMOTE_ANCHOR("UseUdp"),
+        UIWidgets::CheckboxOptions()
+            .Color(THEME_COLOR)
+            .DefaultValue(true)
+            .Tooltip(
+                "Positions, enemy updates and sounds go over UDP when the server supports it: a lost update is simply "
+                "replaced by the next one instead of holding everything else up. Switches back to TCP by itself when "
+                "UDP is blocked."));
+    ImGui::Spacing();
+
     if (UIWidgets::Button("Restore Defaults", UIWidgets::ButtonOptions()
                                                   .Size(ImVec2(ImGui::GetContentRegionAvail().x / 2, 0))
                                                   .Color(UIWidgets::Colors::Red))) {
@@ -174,6 +215,40 @@ void AnchorMainMenu(WidgetInfo& info) {
                                 .DefaultValue(true)
                                 .Tooltip("While you are down, the camera follows a teammate in the same area. "
                                          "Press L to switch teammate."));
+    UIWidgets::CVarCheckbox("Predict Enemy Movement", CVAR_REMOTE_ANCHOR("Coop.PredictEnemies"),
+                            UIWidgets::CheckboxOptions()
+                                .Color(THEME_COLOR)
+                                .DefaultValue(true)
+                                .Tooltip("Enemies that follow another player move on to where they should be by now, "
+                                         "based on their speed and the ping, instead of trailing behind."));
+
+    ImGui::Spacing();
+
+    if (ImGui::CollapsingHeader("Network Debug")) {
+        UIWidgets::CVarCheckbox("Show Network Details In The Room Window", CVAR_REMOTE_ANCHOR("Debug.ShowNetwork"),
+                                UIWidgets::CheckboxOptions()
+                                    .Color(THEME_COLOR)
+                                    .Tooltip("Ping, traffic, queues, UDP/TLS and which player leads the enemies."));
+        ImGui::Text("Simulate a bad connection (only for packets you receive)");
+        UIWidgets::CVarSliderInt("Extra Latency: %d ms", CVAR_REMOTE_ANCHOR("Debug.SimLatency"),
+                                 UIWidgets::IntSliderOptions().Min(0).Max(500).DefaultValue(0).Color(THEME_COLOR));
+        UIWidgets::CVarSliderInt("Jitter: %d ms", CVAR_REMOTE_ANCHOR("Debug.SimJitter"),
+                                 UIWidgets::IntSliderOptions().Min(0).Max(200).DefaultValue(0).Color(THEME_COLOR));
+        UIWidgets::CVarSliderInt("Lost Movement Updates: %d%%", CVAR_REMOTE_ANCHOR("Debug.SimLoss"),
+                                 UIWidgets::IntSliderOptions()
+                                     .Min(0)
+                                     .Max(50)
+                                     .DefaultValue(0)
+                                     .Color(THEME_COLOR)
+                                     .Tooltip("Only packets that may be lost on UDP (positions, enemy updates, "
+                                              "sounds) are dropped."));
+        if (UIWidgets::Button("Reset Simulation", UIWidgets::ButtonOptions().Color(UIWidgets::Colors::Gray))) {
+            CVarClear(CVAR_REMOTE_ANCHOR("Debug.SimLatency"));
+            CVarClear(CVAR_REMOTE_ANCHOR("Debug.SimJitter"));
+            CVarClear(CVAR_REMOTE_ANCHOR("Debug.SimLoss"));
+            Ship::Context::GetRawInstance()->GetWindow()->GetGui()->SaveConsoleVariablesNextFrame();
+        }
+    }
 
     ImGui::Spacing();
 

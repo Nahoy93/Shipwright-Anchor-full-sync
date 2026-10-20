@@ -1,5 +1,18 @@
 # Zelda MP – co-op and private server
 
+## New in 1.2
+
+- **Encrypted connection (TLS)** for the password and everything else, with a certificate the server makes itself.
+- **UDP for movement:** positions, enemies, projectiles and sounds no longer freeze for a moment when a packet is lost. Falls back to TCP by itself.
+- **Less delay:** received packets are used at the start of each game update (up to 50 ms sooner), the server copies packets to everyone instead of the game sending one per player, and enemies that follow another player are predicted to where they should be by now.
+- **Ping, hearts and who is down** in the room window, and a teammate who is down blinks red on the minimap.
+- **Reconnects by itself** when the connection silently dies (Wi-Fi switch), with a short pause between attempts.
+- **Network debug:** traffic and queues in the room window, plus simulated latency, jitter and packet loss to test a bad connection at home.
+- **Smoother picture by default** (*Match Refresh Rate* is on).
+- Fixes: webs, red ice and walls open with their real animation again, hits from several players on the same enemy all count, falling into the void always hurts after a cutscene teleport.
+
+The full list is in `CHANGELOG.md`. Everyone needs the new game **and** the new server.
+
 These features have been added to Ship of Harkinian and the Anchor server:
 
 | Feature | How it works |
@@ -35,6 +48,9 @@ These features have been added to Ship of Harkinian and the Anchor server:
 | **Animals** | Cuccos and horses in the area are in the same place for everyone. If you're carrying a Cucco, or just threw it, you control it. |
 | **Saved sessions** | The server saves each room's progress in the `sessions\` folder and loads it again when someone joins the same Room ID, even after a restart. Different Room IDs are different sessions. |
 | **Update rate** | The room owner chooses how many times per second player and enemy positions are sent (1–20). |
+| **Encrypted connection** | With *Encrypted Connection (TLS)* on, everything between you and the server is encrypted, the password too. The first connection saves the server's certificate, and the game refuses the server if it ever changes. |
+| **UDP for movement** | Positions, enemy updates, projectiles and sounds go over UDP when it works: a lost packet is replaced by the next one instead of holding everything up. If UDP is blocked, they go over TCP like before. |
+| **Ping and status** | The room window shows everyone's ping, your teammates' hearts and who is down. A teammate who is down blinks red on the minimap. |
 
 The room owner can turn every feature on and off under **Network → Anchor → Co-op**.
 
@@ -54,14 +70,16 @@ Only the person hosting needs to do this.
 
 1. Open `Server\Start server.bat` in Notepad.
 2. Change `ANCHOR_PASSWORD=change-to-your-password` to a password of your own. Save the file.
-3. Double click `Start server.bat`. If Windows Firewall asks, click **Allow**.
-4. The window shows `Server running on :43383` and `Password protection: ON`.
+3. Double click `Start server.bat`. If Windows Firewall asks, click **Allow** (it asks for both TCP and UDP).
+4. The window shows `Server running on :43383`, `Password protection: ON`, `Encryption (TLS): ON` and the **TLS certificate fingerprint**.
+
+The first start creates the server's certificate in the `tls\` folder next to `anchor.exe`. Keep that folder: with a new certificate, every player has to press *Forget Saved Certificates* once before they can connect again.
 
 Console commands in the server window:
 
 | Command | What it does |
 |---|---|
-| `list` | Shows active rooms and players |
+| `list` | Shows active rooms and players, with each player's ping, traffic (KB/s), send queue, TLS and UDP |
 | `sessions` | Shows all saved sessions |
 | `save` | Saves all sessions right away (otherwise done automatically every 10 seconds and when the server closes) |
 | `deleteSession <room>` | Deletes a saved session. It must not be active, use `deleteRoom <room>` first. |
@@ -70,12 +88,19 @@ Console commands in the server window:
 
 ### Letting friends connect over the internet
 
-- **Port forwarding:** in your router, forward **TCP port 43383** to your computer's local IP. You can find the local IP with `ipconfig`, for example `192.168.1.23`.
+- **Port forwarding:** in your router, forward **port 43383 for both TCP and UDP** to your computer's local IP. You can find the local IP with `ipconfig`, for example `192.168.1.23`. Without the UDP forward everything still works, just over TCP.
 - **Friends enter your public IP** as Host. You can see it on e.g. whatismyip.com. If you have a dynamic IP, a free DDNS service can give you a fixed name.
 - **On the same network**, your local IP is enough.
 - **You yourself** can enter `127.0.0.1` as Host.
 
-The password is sent unencrypted. It's enough to keep strangers out, but don't reuse a password you use for anything important.
+### Encryption
+
+The server accepts both encrypted and unencrypted connections on the same port. Players turn on **Encrypted Connection (TLS)** in the Anchor menu to encrypt the password and all traffic. Without it, the password is sent unencrypted: enough to keep strangers out, but don't reuse a password you use for anything important.
+
+- The first time you connect, the game saves the server's certificate. If the certificate changes later, the game refuses to connect and says so. That protects against someone pretending to be your server.
+- To be sure from the very first connection, paste the fingerprint from the server window into **Server Fingerprint (optional)**.
+- If the server really was set up again (new `tls\` folder), press **Forget Saved Certificates** and connect again.
+- To only allow encrypted connections, remove `rem` in front of `set ANCHOR_REQUIRE_TLS=1` in `Start server.bat`. `set ANCHOR_TLS=0` turns encryption off completely.
 
 ## 3. Connect in the game
 
@@ -86,6 +111,8 @@ Open **Network → Anchor** in the in-game menu. All players fill in:
 - **Room ID:** the same for everyone, for example `zelda-night`
 - **Team ID:** the same for everyone who should share progress
 - **Name & Color:** whatever you like
+- **Encrypted Connection (TLS):** on, unless the server has TLS turned off
+- **Use UDP For Movement:** on (the default). Turn it off only if movement behaves strangely on your network.
 
 Then click **Enable**. Whoever creates the room first becomes the owner (🔨) and controls the **Co-op** settings.
 
@@ -114,11 +141,22 @@ Higher than 20 can't be chosen, and it wouldn't help. The game's logic runs 20 t
 
 Lower the values if someone has a poor connection or it lags. Raise the enemy rate if enemies look too jerky.
 
+## Room window and network debug
+
+The room window (**Toggle Anchor Room Window**) shows, after each name: hearts, or **DOWN** for a teammate who is waiting to be revived, and the ping in milliseconds (green under 80, yellow under 150, red above). Hearts and ping need the new server.
+
+Under **Network Debug** in the Anchor menu:
+
+- **Show Network Details In The Room Window:** your ping, KB and packets per second in both directions, packets waiting in the queues, whether movement goes over UDP or TCP, whether the connection is encrypted, and which player leads the enemies in your room.
+- **Extra Latency, Jitter, Lost Movement Updates:** makes your connection worse on purpose (only for what you receive), so you can see how the game behaves on a bad connection without having one. Only packets that may be lost on UDP (movement, enemies, sounds) are dropped. **Reset Simulation** turns it all off.
+
+**Predict Enemy Movement** (on by default) moves enemies that follow another player on to where they should be by now, based on their speed and the ping.
+
 ## Good to know and known limitations
 
 - **Reviving** requires the teammate to be in the same area and standing close. If you're down in an area where nobody else is, someone has to come there, otherwise it's game over when the rest of the team also dies.
 - **The music** restarts after a revive. In boss rooms it may be silent until the boss music starts again.
-- **Enemy movement:** one player per room leads the enemies. That's the one with the lowest ID, usually whoever joined first. For the others, enemies are pulled towards the leader's positions ten times per second but keep their own AI so they can attack and be hit. This can look a bit jerky, especially for fast enemies, and the animation doesn't always match the movement. Enemies far off screen aren't updated until you get closer.
+- **Enemy movement:** one player per room leads the enemies. That's the one with the lowest ID, usually whoever joined first. For the others, enemies are pulled towards the leader's positions ten times per second, predicted forward by their speed and the ping, but keep their own AI so they can attack and be hit. When an enemy suddenly turns or stops, the prediction is a little off and gets corrected with a small jerk. The animation doesn't always match the movement. Enemies far off screen aren't updated until you get closer.
 - **Enemies that belong to another enemy** (Dead Hand's hands, Gohma's eggs and others) are only spawned if the "parent" exists for you. An enemy that grabs you (Like Like, ReDead, Wallmaster) is neither moved nor killed by the sync, so you don't get stuck.
 - **If you're in different rooms**, enemy movement isn't synced. Each room is led by whoever is there. Enemies killed in a room you're not in die when you get there, but only while the player who killed them is still in the room.
 - **Bosses share health**, but damage another player does only shows the next time the boss is hit in your game. Some boss phases are only triggered by your own hits.
@@ -136,7 +174,8 @@ Lower the values if someone has a poor connection or it lags. Raise the enemy ra
 - **Not synced yet:** the full AI and attacks of enemies and bosses, Ganondorf and Ganon, minigames and the fishing rod. They need special handling for each enemy and minigame.
 - **Epona** only shows under a teammate who is riding. Two can't ride the same horse, and the horse may be missing in places where the game doesn't allow horses.
 - **Shared game over** requires everyone to have the game over menu up at the same time. Anyone still on their way there gets the answer when the menu shows, for up to 30 seconds.
-- The features have been tested by compiling, **not by playing**. Try a dungeon together and report anything that behaves strangely.
+- **UDP** needs the UDP port forwarded on the host's router. When it doesn't get through, the game notices and uses TCP; the room window's network details show which one is in use.
+- The features have been tested by compiling, **not by playing**. The connection itself (encryption, UDP, ping, the server's copies) is tested automatically against the server. Try a dungeon together and report anything that behaves strangely.
 
 ---
 

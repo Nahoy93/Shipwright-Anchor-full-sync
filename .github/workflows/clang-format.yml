@@ -6,7 +6,8 @@ concurrency:
 
 jobs:
   clang-format:
-    runs-on: ubuntu-latest
+    # ubuntu-latest became Ubuntu 26 (October 2026), which has no clang-format-14 package
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
         with:

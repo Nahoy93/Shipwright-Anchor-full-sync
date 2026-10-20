@@ -1,4 +1,7 @@
 #include <ship/window/gui/IconsFontAwesome4.h>
+#include <chrono>
+#include <set>
+#include <string>
 
 #include "Anchor.h"
 #include "soh/OTRGlobals.h"
@@ -35,8 +38,35 @@ void AnchorRoomWindow::Draw() {
     ImGui::PopStyleColor(2);
 }
 
+static ImVec4 PingColor(int pingMs) {
+    if (pingMs < 80) {
+        return ImVec4(0.5f, 1.0f, 0.5f, 1.0f);
+    }
+    if (pingMs < 150) {
+        return ImVec4(1.0f, 0.9f, 0.4f, 1.0f);
+    }
+    return ImVec4(1.0f, 0.4f, 0.4f, 1.0f);
+}
+
+// Hearts (or DOWN) and ping after a player's name. -1 = unknown, not shown.
+static void DrawPlayerStatus(s16 health, s16 healthCapacity, bool isDown, int pingMs) {
+    if (isDown) {
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "DOWN");
+    } else if (health >= 0 && healthCapacity > 0) {
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), ICON_FA_HEART " %g/%g", health / 16.0f,
+                           healthCapacity / 16.0f);
+    }
+    if (pingMs >= 0) {
+        ImGui::SameLine();
+        ImGui::TextColored(PingColor(pingMs), "%d ms", pingMs);
+    }
+}
+
 void AnchorRoomWindow::DrawElement() {
     bool isGlobalRoom = (std::string("soh-global") == CVarGetString(CVAR_REMOTE_ANCHOR("RoomId"), ""));
+    bool showNetwork = CVarGetInteger(CVAR_REMOTE_ANCHOR("Debug.ShowNetwork"), 0) != 0;
 
     if (isGlobalRoom) {
         u32 activeClients = 0;
@@ -46,6 +76,9 @@ void AnchorRoomWindow::DrawElement() {
             }
         }
         ImGui::Text("Players Online: %d", activeClients);
+        if (showNetwork) {
+            Anchor::Instance->DrawNetworkDetails();
+        }
         return;
     }
 
@@ -92,6 +125,18 @@ void AnchorRoomWindow::DrawElement() {
                 }
             }
 
+            // Hearts and DOWN for the own team, ping for everyone
+            if (client.self) {
+                bool saveLoaded = Anchor::Instance->IsSaveLoaded();
+                DrawPlayerStatus(saveLoaded ? gSaveContext.health : (s16)-1,
+                                 saveLoaded ? gSaveContext.healthCapacity : (s16)-1, Anchor::Instance->coop.isDown,
+                                 Anchor::Instance->rttMs);
+            } else {
+                bool showHealth = isOwnTeam && client.isSaveLoaded;
+                DrawPlayerStatus(showHealth ? client.health : (s16)-1, client.healthCapacity,
+                                 isOwnTeam && client.isDown, client.pingMs);
+            }
+
             if (Anchor::Instance->CanTeleportTo(client.clientId)) {
                 ImGui::SameLine();
                 ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
@@ -126,6 +171,72 @@ void AnchorRoomWindow::DrawElement() {
                 }
             }
             ImGui::PopID();
+        }
+    }
+
+    if (showNetwork) {
+        Anchor::Instance->DrawNetworkDetails();
+    }
+}
+
+// MARK: - Network details (debug)
+
+void Anchor::DrawNetworkDetails() {
+    // Traffic per second, measured over the last second
+    static std::chrono::steady_clock::time_point lastSample;
+    static uint64_t lastBytesSent = 0, lastBytesReceived = 0, lastPacketsSent = 0, lastPacketsReceived = 0;
+    static float kbSent = 0.0f, kbReceived = 0.0f, packetsSentRate = 0.0f, packetsReceivedRate = 0.0f;
+
+    auto now = std::chrono::steady_clock::now();
+    float elapsed = std::chrono::duration<float>(now - lastSample).count();
+    if (elapsed >= 1.0f) {
+        uint64_t sent = bytesSent, received = bytesReceived, packetsOut = packetsSent, packetsIn = packetsReceived;
+        if (elapsed < 5.0f && sent >= lastBytesSent && received >= lastBytesReceived) {
+            kbSent = (float)(sent - lastBytesSent) / 1024.0f / elapsed;
+            kbReceived = (float)(received - lastBytesReceived) / 1024.0f / elapsed;
+            packetsSentRate = (float)(packetsOut - lastPacketsSent) / elapsed;
+            packetsReceivedRate = (float)(packetsIn - lastPacketsReceived) / elapsed;
+        }
+        lastBytesSent = sent;
+        lastBytesReceived = received;
+        lastPacketsSent = packetsOut;
+        lastPacketsReceived = packetsIn;
+        lastSample = now;
+    }
+
+    ImGui::SeparatorText("Network");
+
+    int roundTrip = rttMs;
+    if (roundTrip >= 0) {
+        ImGui::Text("Ping:");
+        ImGui::SameLine();
+        ImGui::TextColored(PingColor(roundTrip), "%d ms", roundTrip);
+    } else {
+        ImGui::Text("Ping: unknown (the server doesn't answer pings)");
+    }
+    ImGui::Text("Sent: %.1f KB/s, %.0f packets/s", kbSent, packetsSentRate);
+    ImGui::Text("Received: %.1f KB/s, %.0f packets/s", kbReceived, packetsReceivedRate);
+    ImGui::Text("Waiting: %d to send, %d to handle", (int)outgoingQueueLength.load(), (int)incomingQueueLength.load());
+
+    int udp = udpState;
+    ImGui::Text("Movement updates: %s", udp == 2 ? "UDP" : udp == 1 ? "TCP (trying UDP)" : "TCP");
+    ImGui::Text("Connection: %s", isTlsActive ? ICON_FA_LOCK " encrypted (TLS)" : ICON_FA_UNLOCK " not encrypted");
+
+    int latency = simLatencyMs, jitter = simJitterMs, loss = simLossPercent;
+    if (latency > 0 || jitter > 0 || loss > 0) {
+        ImGui::TextColored(ImVec4(1.0f, 0.9f, 0.4f, 1.0f), "Simulated: +%d ms, jitter %d ms, %d%% lost", latency,
+                           jitter, loss);
+    }
+
+    if (IsSaveLoaded() && roomState.syncEnemyMovement) {
+        uint32_t authority = EnemySync_GetAuthority();
+        if (authority == 0) {
+            ImGui::Text("Enemies: no teammate in this room");
+        } else if (authority == ownClientId) {
+            ImGui::Text("Enemies: led by you");
+        } else {
+            auto it = clients.find(authority);
+            ImGui::Text("Enemies: led by %s", it != clients.end() ? it->second.name.c_str() : "?");
         }
     }
 }

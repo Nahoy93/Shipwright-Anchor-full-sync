@@ -253,6 +253,13 @@ void DummyPlayer_Draw(Actor* actor, PlayState* play) {
 }
 
 void DummyPlayer_Destroy(Actor* actor, PlayState* play) {
+    // Forget the figure so nothing keeps using it after it's gone
+    uint32_t clientId = Anchor::Instance->GetDummyPlayerClientId(actor);
+    auto it = Anchor::Instance->clients.find(clientId);
+    if (it != Anchor::Instance->clients.end() && it->second.player == (Player*)actor) {
+        it->second.player = nullptr;
+    }
+
     // DummyPlayer Actors are initially spawned as ACTOR_PLAYER, but change their
     // ID shortly afterwards to ACTOR_EN_OE2. This would cause ACTOR_PLAYER's
     // ActorDB Entry's `numLoaded` to leak, which is mostly harmless but hits debug

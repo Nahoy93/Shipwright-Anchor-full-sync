@@ -1,6 +1,11 @@
 #include <nlohmann/json.hpp>
+#include <chrono>
+#include <deque>
+#include <string>
+#include <vector>
 
 #include "Anchor.h"
+#include "soh/Enhancements/game-interactor/GameInteractor.h"
 #include "soh/Enhancements/nametag.h"
 #include "soh/ObjectExtension/ObjectExtension.h"
 
@@ -13,77 +18,242 @@ extern PlayState* gPlayState;
 
 // MARK: - Overrides
 
+/**
+ * Threads
+ *
+ * The network thread (Network.cpp) connects, receives and sends. Everything that touches the game (packet handlers,
+ * hooks, the client list) runs on the game thread, in GameThreadPump at the start of every game update:
+ *  - connection events from the network thread are only flags here; the handshake, hook registration and the team
+ *    state request happen in the pump
+ *  - received packets wait in a queue and are handled in the pump, before the actors update, so they're used in the
+ *    same update instead of the next one
+ */
+
 void Anchor::Enable() {
-    Network::Enable(CVarGetString(CVAR_REMOTE_ANCHOR("Host"), "anchor.hm64.org"),
-                    CVarGetInteger(CVAR_REMOTE_ANCHOR("Port"), 43383));
+    if (isEnabled) {
+        return;
+    }
+
+    std::string host = CVarGetString(CVAR_REMOTE_ANCHOR("Host"), "anchor.hm64.org");
+    uint16_t port = (uint16_t)CVarGetInteger(CVAR_REMOTE_ANCHOR("Port"), 43383);
     ownClientId = CVarGetInteger(CVAR_REMOTE_ANCHOR("LastClientId"), 0);
     roomState.ownerClientId = 0;
+    handshakeSent = false;
+    pendingConnectEvent = false;
+    pendingDisconnectEvent = false;
+
+    useTls = CVarGetInteger(CVAR_REMOTE_ANCHOR("UseTls"), 0) != 0;
+    {
+        std::lock_guard<std::mutex> lock(tlsMutex);
+        tlsHostKey = host + ":" + std::to_string(port);
+        std::string pinned = CVarGetString(CVAR_REMOTE_ANCHOR("TlsFingerprint"), "");
+        // Only spaces counts as empty
+        tlsExpectedIsPinned = pinned.find_first_not_of(" \t\r\n") != std::string::npos;
+        tlsExpectedFingerprint = tlsExpectedIsPinned ? pinned : KnownTlsFingerprint(tlsHostKey);
+        tlsLearnedFingerprint.clear();
+        tlsError.clear();
+        tlsWarning.clear();
+        tlsWarned = false;
+    }
+
+    UpdateNetworkSnapshot();
+
+    if (pumpHookId == 0) {
+        pumpHookId = GameInteractor::Instance->RegisterGameHook<GameInteractor::OnGameStateMainStart>(
+            [this]() { GameThreadPump(); });
+    }
+
+    Network::Enable(host.c_str(), port);
 }
 
 void Anchor::Disable() {
     Network::Disable();
+
+    if (pumpHookId != 0) {
+        GameInteractor::Instance->UnregisterGameHook<GameInteractor::OnGameStateMainStart>(pumpHookId);
+        pumpHookId = 0;
+    }
+    pendingConnectEvent = false;
+    pendingDisconnectEvent = false;
+    handshakeSent = false;
+    // Not connected any more, so this removes the connection's hooks
+    RegisterHooks();
+
+    {
+        std::lock_guard<std::mutex> lock(incomingPacketQueueMutex);
+        incomingPacketQueue.clear();
+        incomingQueueLength = 0;
+    }
+    {
+        std::lock_guard<std::mutex> lock(outgoingPacketQueueMutex);
+        outgoingPacketQueue.clear();
+        outgoingQueueLength = 0;
+    }
 
     clients.clear();
     ResetCoopState();
     RefreshClientActors();
 }
 
+// Network thread
 void Anchor::OnConnected() {
-    SendPacket_Handshake();
-    RegisterHooks();
+    ResetTransportState();
+
+    // Nothing queued for the old connection may go out before this connection's handshake. Under the queue lock, so
+    // SendJsonToRemote either queues before the clear or sees the pending event and waits for the handshake.
+    std::lock_guard<std::mutex> lock(outgoingPacketQueueMutex);
+    pendingConnectEvent = true;
+    outgoingPacketQueue.clear();
+    outgoingQueueLength = 0;
+}
+
+// Network thread
+void Anchor::OnDisconnected() {
+    ResetTransportState();
+    pendingDisconnectEvent = true;
+}
+
+// Game thread, at the start of every game update
+void Anchor::GameThreadPump() {
+    if (pendingDisconnectEvent.exchange(false)) {
+        handshakeSent = false;
+        RegisterHooks();
+    }
+
+    if (pendingConnectEvent.exchange(false) && isConnected) {
+        // The handshake must be the first packet the server gets
+        handshakeSent = false;
+        SendPacket_Handshake();
+        handshakeSent = true;
+        RegisterHooks();
+
+        if (IsSaveLoaded()) {
+            SendPacket_RequestTeamState();
+        }
+    }
+
+    UpdateNetworkSnapshot();
+    ProcessTlsEvents();
+    ProcessIncomingPacketQueue();
+}
+
+// Game thread: settings and game state the network thread needs
+void Anchor::UpdateNetworkSnapshot() {
+    settingUseUdp = CVarGetInteger(CVAR_REMOTE_ANCHOR("UseUdp"), 1) != 0;
+    simLatencyMs = CVarGetInteger(CVAR_REMOTE_ANCHOR("Debug.SimLatency"), 0);
+    simJitterMs = CVarGetInteger(CVAR_REMOTE_ANCHOR("Debug.SimJitter"), 0);
+    simLossPercent = CVarGetInteger(CVAR_REMOTE_ANCHOR("Debug.SimLoss"), 0);
 
     if (IsSaveLoaded()) {
-        SendPacket_RequestTeamState();
+        statusHealth = gSaveContext.health;
+        statusHealthCapacity = gSaveContext.healthCapacity;
+    } else {
+        statusHealth = -1;
+        statusHealthCapacity = -1;
     }
+    statusDown = coop.isDown;
 }
 
-void Anchor::OnDisconnected() {
-    RegisterHooks();
-}
-
+// Network thread
 void Anchor::ProcessOutgoingPackets() {
     // Copy all queued packets while holding the lock, then send them after releasing
-    std::queue<nlohmann::json> packetsToSend;
+    std::deque<AnchorOutgoingPacket> packetsToSend;
     {
         std::lock_guard<std::mutex> lock(outgoingPacketQueueMutex);
         packetsToSend.swap(outgoingPacketQueue);
+        outgoingQueueLength = 0;
     }
 
-    // Send packets without holding the lock
-    while (!packetsToSend.empty()) {
-        nlohmann::json payload = packetsToSend.front();
-        packetsToSend.pop();
-
-        if (!payload.contains("quiet")) {
-            SPDLOG_DEBUG("[Anchor] Sending payload:\n{}", payload.dump());
+    // Everything that goes over TCP is written in one go
+    std::string batch;
+    for (auto& packet : packetsToSend) {
+        std::string text = packet.json.dump();
+        if (!packet.json.contains("quiet")) {
+            SPDLOG_DEBUG("[Anchor] Sending payload:\n{}", text);
         }
-        Network::SendJsonToRemote(payload);
+        packetsSent++;
+
+        if (packet.realtime && SendUdpPayload(text)) {
+            continue;
+        }
+
+        batch.append(text);
+        batch.push_back('\0');
+        if (batch.size() >= 64 * 1024) {
+            SendRawToRemote(batch.data(), batch.size());
+            batch.clear();
+        }
+    }
+
+    if (!batch.empty()) {
+        SendRawToRemote(batch.data(), batch.size());
     }
 }
 
+// Game thread
 void Anchor::SendJsonToRemote(nlohmann::json payload) {
     if (!isConnected) {
         return;
     }
+
+    std::string packetType =
+        payload.contains("type") && payload["type"].is_string() ? payload["type"].get<std::string>() : "";
+    bool isHandshake = packetType == HANDSHAKE;
 
     payload["clientId"] = ownClientId;
     if (!payload.contains("quiet")) {
         SPDLOG_DEBUG("[Anchor] Queuing payload:\n{}", payload.dump());
     }
 
-    if (payload["type"] == HANDSHAKE) {
-        Network::SendJsonToRemote(payload);
-        return;
-    }
+    bool realtime = Anchor_IsRealtimePacket(packetType);
 
     // Queue the packet to be sent on the network thread
     std::lock_guard<std::mutex> lock(outgoingPacketQueueMutex);
-    outgoingPacketQueue.push(payload);
+    // Until this connection's handshake is queued, the server would drop anything else anyway
+    if (!isHandshake && (!handshakeSent || pendingConnectEvent)) {
+        return;
+    }
+    outgoingPacketQueue.push_back({ std::move(payload), realtime });
+    outgoingQueueLength = outgoingPacketQueue.size();
 }
 
+void Anchor::SendToClients(nlohmann::json& payload, const std::vector<uint32_t>& clientIds) {
+    if (clientIds.empty()) {
+        return;
+    }
+
+    // One packet with a list of targets, the server makes the copies
+    if (serverSupportsTargets && clientIds.size() > 1) {
+        payload.erase("targetClientId");
+        payload["targetClientIds"] = clientIds;
+        SendJsonToRemote(payload);
+        return;
+    }
+
+    for (uint32_t clientId : clientIds) {
+        payload["targetClientId"] = clientId;
+        SendJsonToRemote(payload);
+    }
+}
+
+// Network thread
 void Anchor::OnIncomingJson(nlohmann::json payload) {
     // If it doesn't contain a type, it's not a valid payload
-    if (!payload.contains("type")) {
+    if (!payload.contains("type") || !payload["type"].is_string()) {
+        return;
+    }
+
+    std::string packetType = payload["type"].get<std::string>();
+
+    // Transport packets are handled right here on the network thread
+    if (packetType == SERVER_INFO) {
+        HandleServerInfo(payload);
+        return;
+    }
+    if (packetType == PONG) {
+        HandlePongTiming(payload);
+    }
+    if (packetType == "HEARTBEAT") {
         return;
     }
 
@@ -92,37 +262,50 @@ void Anchor::OnIncomingJson(nlohmann::json payload) {
         SPDLOG_DEBUG("[Anchor] Received payload:\n{}", payload.dump());
     }
 
-    std::string packetType = payload["type"].get<std::string>();
-
-    // Ignore packets from mismatched clients, except for ALL_CLIENT_STATE, UPDATE_CLIENT_STATE, and PLAYER_UPDATE
-    if (packetType != ALL_CLIENT_STATE && packetType != UPDATE_CLIENT_STATE && packetType != PLAYER_UPDATE) {
-        if (payload.contains("clientId")) {
-            uint32_t clientId = payload["clientId"].get<uint32_t>();
-            if (clients.contains(clientId) && clients[clientId].clientVersion != clientVersion) {
-                return;
-            }
-        }
+    // Debug: simulated network problems
+    auto releaseAt = std::chrono::steady_clock::now();
+    if (!SimulateIncomingPacket(packetType, releaseAt)) {
+        return;
     }
 
     // Queue all packets to be processed on the game thread
     std::lock_guard<std::mutex> lock(incomingPacketQueueMutex);
-    incomingPacketQueue.push(payload);
+    incomingPacketQueue.push_back({ std::move(payload), releaseAt });
+    incomingQueueLength = incomingPacketQueue.size();
 }
 
+// Game thread
 void Anchor::ProcessIncomingPacketQueue() {
-    // Copy all queued packets while holding the lock, then process them after releasing
-    std::queue<nlohmann::json> packetsToProcess;
+    // Take the packets that are due while holding the lock, then process them after releasing
+    std::vector<AnchorIncomingPacket> packetsToProcess;
     {
         std::lock_guard<std::mutex> lock(incomingPacketQueueMutex);
-        packetsToProcess.swap(incomingPacketQueue);
+        auto now = std::chrono::steady_clock::now();
+        while (!incomingPacketQueue.empty() && incomingPacketQueue.front().releaseAt <= now) {
+            packetsToProcess.push_back(std::move(incomingPacketQueue.front()));
+            incomingPacketQueue.pop_front();
+        }
+        incomingQueueLength = incomingPacketQueue.size();
     }
 
     // Process packets without holding the lock
-    while (!packetsToProcess.empty()) {
-        nlohmann::json payload = packetsToProcess.front();
-        packetsToProcess.pop();
+    for (auto& packet : packetsToProcess) {
+        // A packet (DISABLE_ANCHOR) or a refused server may have turned Anchor off in the meantime
+        if (!isEnabled) {
+            break;
+        }
 
+        nlohmann::json& payload = packet.json;
         std::string packetType = payload["type"].get<std::string>();
+
+        // Ignore packets from mismatched clients, except for ALL_CLIENT_STATE, UPDATE_CLIENT_STATE, and PLAYER_UPDATE
+        if (packetType != ALL_CLIENT_STATE && packetType != UPDATE_CLIENT_STATE && packetType != PLAYER_UPDATE &&
+            payload.contains("clientId") && payload["clientId"].is_number()) {
+            auto it = clients.find(payload["clientId"].get<uint32_t>());
+            if (it != clients.end() && it->second.clientVersion != clientVersion) {
+                continue;
+            }
+        }
 
         isProcessingIncomingPacket = true;
 
@@ -227,6 +410,8 @@ void Anchor::ProcessIncomingPacketQueue() {
                 HandlePacket_RupeeIncome(payload);
             else if (packetType == WARP_SPAWNED)
                 HandlePacket_WarpSpawned(payload);
+            else if (packetType == PONG)
+                HandlePacket_Pong(payload);
         } catch (const std::exception& e) {
             SPDLOG_ERROR("[Anchor] Exception while processing incoming packet {}", e.what());
             SPDLOG_ERROR("[Anchor] Packet: {}", payload.dump());
@@ -257,6 +442,12 @@ void Anchor::SetDummyPlayerClientId(const Actor* actor, uint32_t clientId) {
 void Anchor::RefreshClientActors() {
     if (!IsSaveLoaded()) {
         return;
+    }
+
+    // The old figures are killed below; nobody may keep pointing at them, including offline clients that don't get a
+    // new figure
+    for (auto& [clientId, client] : clients) {
+        client.player = nullptr;
     }
 
     Actor* actor = gPlayState->actorCtx.actorLists[ACTORCAT_NPC].head;

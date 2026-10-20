@@ -212,10 +212,16 @@ void Anchor::Coop_ProcessPendingCutscene() {
     gSaveContext.respawn[RESPAWN_MODE_DOWN].playerParams = 0xDFF;
     gSaveContext.nextTransitionType = TRANS_TYPE_FADE_WHITE_FAST;
     gSaveContext.respawnFlag = 1;
+    // No void damage on arrival (the respawn point may be over a pit). Only one of these may be registered at a time:
+    // a second teleport before the first void-out must replace it, or the old one would stay registered for good.
     static HOOK_ID hookId = 0;
+    if (hookId != 0) {
+        GameInteractor::Instance->UnregisterGameHookForID<GameInteractor::OnVanillaBehavior>(hookId);
+    }
     hookId = REGISTER_VB_SHOULD(VB_INFLICT_VOID_DAMAGE, {
         *should = false;
         GameInteractor::Instance->UnregisterGameHookForID<GameInteractor::OnVanillaBehavior>(hookId);
+        hookId = 0;
     });
 
     coop.pendingTeleportDone = true;

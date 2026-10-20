@@ -85,10 +85,5 @@ void Anchor::HandlePacket_SetFlag(nlohmann::json payload) {
         effect->parameters[1] = flagType;
         effect->parameters[2] = flag;
         effect->Apply();
-
-        // Objects in the room that only check this flag when they load
-        if (flagType == FLAG_SCENE_SWITCH) {
-            Coop_OnRemoteSwitchFlag(sceneNum, flag);
-        }
     }
 }

@@ -99,7 +99,7 @@ void Anchor::RegisterHooks() {
         SendPacket_PlayerUpdate();
     });
 
-    COND_HOOK(OnGameFrameUpdate, isConnected, [&]() { ProcessIncomingPacketQueue(); });
+    // Received packets are handled at the start of every game update instead, see Anchor::GameThreadPump
 
     COND_HOOK(OnPlayerSfx, isConnected, [&](u16 sfxId) { SendPacket_PlayerSfx(sfxId); });
     COND_HOOK(OnOcarinaNote, isConnected,
@@ -452,8 +452,16 @@ void Anchor::RegisterHooks() {
             if (!client.self && client.online && client.player && client.sceneNum == gPlayState->sceneNum &&
                 (!isInDungeon || client.curRoomNum == displayedRoomNum) &&
                 (Anchor::Instance->roomState.showLocationsMode == 2 || client.teamId == teamId)) {
+                // A teammate who is down and waiting to be revived blinks red
+                Color_RGB8 color = client.color;
+                if (client.isDown && client.teamId == teamId && (gPlayState->gameplayFrames / 4) % 2 == 0) {
+                    // (no braces with commas here, this is inside a macro argument)
+                    color.r = 255;
+                    color.g = 40;
+                    color.b = 40;
+                }
                 compassIcons.push_back(
-                    CompassIcon{ client.player->actor.world.pos, client.player->actor.shape.rot, 0.3f, client.color });
+                    CompassIcon{ client.player->actor.world.pos, client.player->actor.shape.rot, 0.3f, color });
             }
         }
 

@@ -6,8 +6,13 @@
 #include <libultraship/bridge/consolevariablebridge.h>
 #include <ship/window/gui/GuiWindow.h>
 #include <spdlog/spdlog.h>
+#include <atomic>
+#include <chrono>
+#include <deque>
 #include <queue>
 #include <mutex>
+#include <vector>
+#include "soh/Network/Anchor/UdpChannel.h"
 
 extern "C" {
 #include "variables.h"
@@ -19,7 +24,8 @@ void DummyPlayer_Update(Actor* actor, PlayState* play);
 void DummyPlayer_Draw(Actor* actor, PlayState* play);
 void DummyPlayer_Destroy(Actor* actor, PlayState* play);
 
-typedef struct {
+// Named: MSVC refuses default member initializers in an unnamed struct that gets its name from a typedef (C7626)
+typedef struct AnchorClient {
     uint32_t clientId;
     std::string name;
     Color_RGB8 color;
@@ -71,9 +77,26 @@ typedef struct {
     s16 horseRotY;
     std::vector<s16> horseJoints;
 
+    // Ping and hearts, from the server every few seconds (PONG); -1 = unknown
+    s32 pingMs = -1;
+    s16 health = -1;
+    s16 healthCapacity = -1;
+
     // Ptr to the dummy player
     Player* player;
 } AnchorClient;
+
+// A packet waiting to be sent. Realtime packets (positions, enemy snapshots, ...) may go over UDP.
+struct AnchorOutgoingPacket {
+    nlohmann::json json;
+    bool realtime;
+};
+
+// A received packet, handed to the game at releaseAt (later than now only with the simulated latency)
+struct AnchorIncomingPacket {
+    nlohmann::json json;
+    std::chrono::steady_clock::time_point releaseAt;
+};
 
 typedef struct {
     uint32_t ownerClientId;
@@ -116,11 +139,77 @@ class Anchor : public Network {
     bool justLoadedSave = false;
     bool isHandlingUpdateTeamState = false;
     bool isProcessingIncomingPacket = false;
-    std::queue<nlohmann::json> incomingPacketQueue;
+    std::deque<AnchorIncomingPacket> incomingPacketQueue;
     std::mutex incomingPacketQueueMutex;
-    std::queue<nlohmann::json> outgoingPacketQueue;
+    std::deque<AnchorOutgoingPacket> outgoingPacketQueue;
     std::mutex outgoingPacketQueueMutex;
 
+    // Connection events from the network thread, handled on the game thread (see GameThreadPump)
+    std::atomic<bool> pendingConnectEvent{ false };
+    std::atomic<bool> pendingDisconnectEvent{ false };
+    bool handshakeSent = false;
+    uint32_t pumpHookId = 0;
+
+    // What the server can do, from SERVER_INFO (network thread)
+    std::atomic<bool> serverSupportsTargets{ false };
+    std::atomic<bool> serverSupportsPing{ false };
+
+    // UDP channel, network thread only
+    AnchorUdp::Codec udpCodec;
+    uint32_t udpToken = 0;
+    uint64_t udpSendSequence = 0;
+    uint64_t udpReceiveSequence = 0;
+    bool udpReady = false;
+    bool udpWanted = false;
+    std::chrono::steady_clock::time_point udpLastHello;
+    std::chrono::steady_clock::time_point udpLastReceive;
+    std::chrono::steady_clock::time_point lastPingSent;
+
+    // Copied from settings and game state by the game thread every frame, read by the network thread
+    std::atomic<bool> settingUseUdp{ true };
+    std::atomic<int> simLatencyMs{ 0 };
+    std::atomic<int> simJitterMs{ 0 };
+    std::atomic<int> simLossPercent{ 0 };
+    std::atomic<int> statusHealth{ -1 };
+    std::atomic<int> statusHealthCapacity{ -1 };
+    std::atomic<bool> statusDown{ false };
+
+    // TLS server trust: the fingerprint to expect (pinned in the menu or remembered from the first connection)
+    std::mutex tlsMutex;
+    std::string tlsHostKey;
+    std::string tlsExpectedFingerprint;
+    bool tlsExpectedIsPinned = false;
+    std::string tlsLearnedFingerprint;
+    std::string tlsError;
+    std::string tlsWarning; // a failed handshake, shown once per Enable
+    bool tlsWarned = false;
+
+    uint32_t udpHellosUnanswered = 0;
+
+    // Game thread
+    void GameThreadPump();
+    void UpdateNetworkSnapshot();
+    void ProcessTlsEvents();
+    void HandlePacket_Pong(nlohmann::json payload);
+    // Network thread, see Transport.cpp
+    void HandleServerInfo(const nlohmann::json& payload);
+    void HandlePongTiming(const nlohmann::json& payload);
+    void ResetTransportState();
+    bool SendUdpPayload(const std::string& payload);
+    void SendUdpHello();
+    // Debug: drops or delays a received packet like a bad connection would. False = drop it.
+    bool SimulateIncomingPacket(const std::string& packetType, std::chrono::steady_clock::time_point& releaseAt);
+    // The certificate fingerprint remembered for "host:port", empty when unknown
+    static std::string KnownTlsFingerprint(const std::string& hostKey);
+    static void RememberTlsFingerprint(const std::string& hostKey, const std::string& fingerprint);
+
+  protected:
+    bool OnTlsCertificate(const std::string& fingerprint) override;
+    void OnTlsFailed(const std::string& reason) override;
+    void OnNetworkTick() override;
+    void OnUdpDatagram(const uint8_t* data, size_t length) override;
+
+  private:
     nlohmann::json PrepClientState();
     nlohmann::json PrepRoomState();
     void RegisterHooks();
@@ -228,7 +317,6 @@ class Anchor : public Network {
     void HandlePacket_GameOverChoice(nlohmann::json payload);
     void HandlePacket_TradeTimer(nlohmann::json payload);
     // Batch 4
-    void Coop_OnRemoteSwitchFlag(s16 sceneNum, s16 flag);
     void Coop_UpdateWarpBlocks();
     void Coop_UpdateWeather();
     void HandlePacket_Weather(nlohmann::json payload);
@@ -243,6 +331,23 @@ class Anchor : public Network {
   public:
     uint32_t ownClientId;
     inline static const std::string clientVersion = (char*)gGitCommitHash;
+
+    // Connection status for the room window and the debug view
+    std::atomic<int> rttMs{ -1 };   // round trip to the server, measured with PING/PONG
+    std::atomic<int> udpState{ 0 }; // 0 = not used, 1 = trying, 2 = in use
+    std::atomic<size_t> outgoingQueueLength{ 0 };
+    std::atomic<size_t> incomingQueueLength{ 0 };
+
+    // Sends one packet to several clients: once with a list of targets when the server can fan it out, otherwise once
+    // per client
+    void SendToClients(nlohmann::json& payload, const std::vector<uint32_t>& clientIds);
+    // Forgets remembered server certificates (menu)
+    static void ForgetTlsCertificates();
+    // Ping, traffic, queues and UDP/TLS state for the room window, see AnchorRoomWindow.cpp
+    void DrawNetworkDetails();
+    // Roughly how old a packet from this client is when the game uses it: half of their round trip to the server,
+    // half of ours, the wait for the next game update and the simulated latency
+    int EstimatedPacketAgeMs(uint32_t senderClientId);
 
     // Packet types //
     inline static const std::string ALL_CLIENT_STATE = "ALL_CLIENT_STATE";
@@ -296,6 +401,12 @@ class Anchor : public Network {
     inline static const std::string SONG_LEARNED = "SONG_LEARNED";
     inline static const std::string BOSS_ROOM = "BOSS_ROOM";
     inline static const std::string AGE_CHANGED = "AGE_CHANGED";
+    // Transport
+    inline static const std::string SERVER_INFO = "SERVER_INFO";
+    inline static const std::string PING = "PING";
+    inline static const std::string PONG = "PONG";
+    inline static const std::string UDP_HELLO = "UDP_HELLO";
+    inline static const std::string UDP_ACK = "UDP_ACK";
 
     // Co-op runtime state (game thread only)
     struct CoopState {
@@ -377,6 +488,12 @@ class Anchor : public Network {
     void SendPacket_WarpSpawned(Actor* actor);
 };
 
+// Packets where only the newest one matters (positions, snapshots, sounds): they may go over UDP, and a lost one is
+// replaced by the next
+bool Anchor_IsRealtimePacket(const std::string& packetType);
+// The SHA-256 fingerprint ("AB:CD:..." with 32 pairs) found in a text, empty when there is none, see Transport.cpp
+std::string Anchor_ParseFingerprint(const std::string& text);
+
 typedef enum {
     // Starting at 5 to continue from the last value in the PlayerDamageResponseType enum
     DUMMY_PLAYER_HIT_RESPONSE_STUN = 5,
@@ -399,10 +516,10 @@ class AnchorRoomWindow : public Ship::GuiWindow {
   public:
     using GuiWindow::GuiWindow;
 
-    void InitElement() override {};
+    void InitElement() override{};
     void DrawElement() override;
     void Draw() override;
-    void UpdateElement() override {};
+    void UpdateElement() override{};
 };
 
 #endif // __cplusplus

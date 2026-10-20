@@ -46,8 +46,9 @@ jobs:
           cp out/anchor.exe coop/"Start server.bat" "pkg/Zelda MP Co-op/Server/"
           cp coop/*.md "pkg/Zelda MP Co-op/"
           (cd pkg && zip -qr "../out/Zelda-MP-Coop-Windows.zip" "Zelda MP Co-op")
-          (cd dl/soh-linux-x86_64 && zip -qr ../../out/soh-linux-x86_64.zip .)
-          (cd dl/soh-linux-aarch64 && zip -qr ../../out/soh-linux-aarch64.zip .)
+          # Linux and macOS are only built for co-op commits with [full build] in the message
+          if [ -d dl/soh-linux-x86_64 ]; then (cd dl/soh-linux-x86_64 && zip -qr ../../out/soh-linux-x86_64.zip .); fi
+          if [ -d dl/soh-linux-aarch64 ]; then (cd dl/soh-linux-aarch64 && zip -qr ../../out/soh-linux-aarch64.zip .); fi
           if [ -d dl/soh-mac ]; then (cd dl/soh-mac && zip -qr ../../out/soh-mac.zip .); fi
           ls -la out
 
