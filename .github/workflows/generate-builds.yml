@@ -1,6 +1,9 @@
 name: generate-builds
 on:
   push:
+    # The release branch only holds a release commit (coop-release.yml), there is nothing to build
+    branches-ignore:
+      - coop-release
   pull_request:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -45,6 +48,8 @@ jobs:
 
   build-macos:
     needs: generate-soh-otr
+    # Co-op branches only build Windows (the release uses it), unless the commit message says [full build]
+    if: ${{ !(github.ref_name == 'zelda-mp-coop' || startsWith(github.ref_name, 'coop-') || github.head_ref == 'zelda-mp-coop' || startsWith(github.head_ref, 'coop-')) || contains(github.event.head_commit.message, '[full build]') }}
     runs-on: macos-14
     steps:
     - name: Git Checkout
@@ -88,6 +93,8 @@ jobs:
 
   build-linux:
     needs: generate-soh-otr
+    # Co-op branches only build Windows (the release uses it), unless the commit message says [full build]
+    if: ${{ !(github.ref_name == 'zelda-mp-coop' || startsWith(github.ref_name, 'coop-') || github.head_ref == 'zelda-mp-coop' || startsWith(github.head_ref, 'coop-')) || contains(github.event.head_commit.message, '[full build]') }}
     strategy:
       fail-fast: false
       matrix:
